@@ -1,0 +1,11 @@
+.backup-controls .actions { margin-bottom: 16px; }
+.backup-controls input[type='file'] { max-width: 100%; padding: 10px 0; font-size: .85rem; }
+.backup-controls input[type='file']::file-selector-button { color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-right: 12px; cursor: pointer; }
+.backup-notice { color: var(--accent); font-size: .85rem; }
+.backup-warning { color: var(--danger); font-size: .85rem; }
+.backup-filename { overflow-wrap: anywhere; }
+.backup-preview { width: 100%; border-collapse: collapse; font-size: .8rem; margin: 24px 0; }
+.backup-preview caption { text-align: left; font-weight: 600; margin-bottom: 12px; }
+.backup-preview th, .backup-preview td { padding: 12px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+.backup-confirm { display: flex; align-items: center; gap: 12px; margin: 20px 0; min-height: 44px; font-size: .9rem; }
+.backup-confirm input { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--accent); }
