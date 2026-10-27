@@ -22,7 +22,7 @@ async function addResource() {
   await user.click(screen.getByRole('button', { name: 'Add resource' }))
   await user.type(screen.getByLabelText('Title'), 'Cache design')
   await user.selectOptions(screen.getByLabelText('Preparation area'), 'System Design')
-  await user.selectOptions(screen.getByLabelText('Source'), 'Hello Interview')
+  await user.selectOptions(screen.getByLabelText('Source'), 'Source 1')
   await user.type(screen.getByLabelText('Topic tags'), 'cache, scaling, cache, ')
   await user.type(screen.getByLabelText('URL (optional)'), 'https://example.com/cache')
   await user.type(screen.getByLabelText('Notes or solution text'), '<script>alert(1)</script>\nEviction policies')

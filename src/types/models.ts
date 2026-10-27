@@ -13,8 +13,8 @@ export const PREPARATION_AREAS = [
 ] as const
 
 export const RESOURCE_SOURCES = [
-  'Interview Kickstart', 'LeetCode', 'Hello Interview', 'ByteByteGo',
-  '1point3acres', 'Notion', 'Other',
+  'LeetCode', 'Source 1', 'Source 2',
+  'Source 3', 'Notion', 'Other',
 ] as const
 export const RESOURCE_STATUSES = ['Not Started', 'In Progress', 'Reviewed'] as const
 export const SCREENS = ['dashboard', 'planner', 'resources', 'design-lab', 'jobs', 'settings'] as const
