@@ -9,6 +9,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
+from typing import Literal
+from retrieval import rank
 
 MODEL = 'BAAI/bge-small-en-v1.5'
 CONFIG = {'chunker': 'page-paragraph-v1', 'max_tokens': 440, 'overlap_tokens': 40,
@@ -80,6 +82,12 @@ class Selection(BaseModel):
 class Search(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     top_k: int = Field(default=5, ge=1, le=10)
+    method: Literal['dense', 'keyword', 'hybrid'] = 'dense'
+    group_pages: bool = False
+
+
+class CorpusSearch(Search):
+    document_ids: list[str] = Field(min_length=1, max_length=20)
 
 
 def source(db, selection):
@@ -262,27 +270,34 @@ def register(app, connect, data):
         finally:
             db.close()
 
-    @app.post('/api/index/{document_id}/search')
-    def search(document_id: str, request: Search):
+    def retrieve(document_ids, request):
         if not request.query.strip():
             raise HTTPException(422, 'Enter a query.')
         with LOCK:
             db = connect()
             try:
-                info = status_data(db, document_id)
-                if info['state'] != 'ready':
-                    raise HTTPException(409, 'Build a current index before searching.')
-                m = model()
-                if m.fingerprint != info['model_fingerprint']:
-                    raise HTTPException(409, 'Model files changed. Rebuild the index.')
-                import numpy as np
-                query = np.array(m.query(request.query))
-                rows = db.execute('SELECT text, metadata, vector FROM chunks WHERE document_id=?', (document_id,)).fetchall()
-                results = []
-                for row in rows:
-                    v = np.array(json.loads(row['vector']))
-                    score = float(np.dot(query, v) / (np.linalg.norm(query) * np.linalg.norm(v)))
-                    results.append({'text': row['text'], 'metadata': json.loads(row['metadata']), 'score': score})
-                return {'results': sorted(results, key=lambda r: r['score'], reverse=True)[:request.top_k]}
+                infos = [status_data(db, identifier) for identifier in dict.fromkeys(document_ids)]
+                if any(info['state'] != 'ready' for info in infos):
+                    raise HTTPException(409, 'Build current indexes for every selected document before searching.')
+                m = model() if request.method != 'keyword' else None
+                if m and any(m.fingerprint != info['model_fingerprint'] for info in infos):
+                    raise HTTPException(409, 'Model files changed. Rebuild the selected indexes.')
+                # Compare vectors only when every selected index uses identical model artifacts.
+                if m and len({info['model_fingerprint'] for info in infos}) != 1:
+                    raise HTTPException(409, 'Selected indexes use different model files. Rebuild them together.')
+                rows = []
+                for identifier in dict.fromkeys(document_ids):
+                    rows.extend(dict(r) for r in db.execute('SELECT id,text,metadata,vector FROM chunks WHERE document_id=? ORDER BY ordinal', (identifier,)))
+                result = rank(rows, request.query, request.method, m, request.top_k, request.group_pages)
+                result['index_snapshots'] = [{key: info[key] for key in ('document_id', 'source_hash', 'config', 'model_fingerprint', 'built_at')} for info in infos]
+                return result
             finally:
                 db.close()
+
+    @app.post('/api/index/{document_id}/search')
+    def search(document_id: str, request: Search):
+        return retrieve([document_id], request)
+
+    @app.post('/api/retrieval/search')
+    def corpus_search(request: CorpusSearch):
+        return retrieve(request.document_ids, request)

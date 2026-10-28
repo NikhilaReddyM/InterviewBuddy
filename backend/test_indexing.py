@@ -97,3 +97,17 @@ class IndexTests(unittest.TestCase):
         response = self.post('/api/index/build', {**self.selection, 'start_page': 3})
         self.assertEqual(response.status_code, 422)
         self.assertEqual(self.client.get('/api/index/d').json()['state'], 'ready')
+
+    def test_all_retrieval_methods_and_stale_multi_document_corpus(self):
+        self.post('/api/index/build', self.selection)
+        for method in ('dense', 'keyword', 'hybrid'):
+            response = self.post('/api/retrieval/search', {'document_ids':['d'], 'query':'binary search', 'method':method})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['method'], method)
+            self.assertEqual(response.json()['results'][0]['metadata']['document_id'], 'd')
+            self.assertIn('elapsed_ms', response.json())
+        self.assertEqual(self.post('/api/retrieval/search', {'document_ids':[], 'query':'binary search'}).status_code, 422)
+        self.assertEqual(self.post('/api/retrieval/search', {'document_ids':['missing'], 'query':'binary search'}).status_code, 409)
+        self.assertEqual(self.post('/api/index/d/search', {'query':'binary search','method':'bad'}).status_code, 422)
+        documents.save_review('d', 1, documents.Review(text='edited', method='direct',review_status='reviewed', revision=0))
+        self.assertEqual(self.post('/api/retrieval/search', {'document_ids':['d'],'query':'binary search','method':'keyword'}).status_code, 409)

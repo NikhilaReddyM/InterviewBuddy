@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 
-type Chunk = { id?: string; text: string; metadata: { pages: number[]; token_count: number; review_status: string; method: string; experimental: boolean; content_type: string; split_page: boolean }; score?: number }
+type Chunk = { id?: string; text: string; metadata: { pages: number[]; token_count: number; review_status: string; method: string; experimental: boolean; content_type: string; split_page: boolean }; score?: number; score_type?: string }
 type Plan = { included_pages: number[]; skipped_pages: { page: number; reason: string }[]; chunks: Chunk[]; config: { model: string; max_tokens: number; overlap_tokens: number } }
 type Status = { selection?: { start_page: number; end_page: number; include_unreviewed: boolean }; included?: number; skipped?: Plan['skipped_pages']; state: string; built_at?: string; config?: Plan['config']; chunks: Chunk[] }
 async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -27,6 +27,8 @@ export function DocumentIndex({ documentId, pageCount, sourceVersion, embedded =
   const [results, setResults] = useState<Chunk[]>([])
   const [searched, setSearched] = useState(false)
   const [query, setQuery] = useState('')
+  const [retrievalMethod, setRetrievalMethod] = useState('dense')
+  const [elapsed, setElapsed] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -62,8 +64,8 @@ export function DocumentIndex({ documentId, pageCount, sourceVersion, embedded =
         setStatus(await api<Status>(`/api/index/${documentId}`)); setPlan(null); setResults([]); setSearched(false)
         setNotice(`Index saved: ${result.chunk_count} chunks; ${result.embedded} new embeddings, ${result.reused} reused.`)
       } else {
-        const result = await api<{ results: Chunk[] }>(`/api/index/${documentId}/search`, { query, top_k: 5 })
-        setResults(result.results); setSearched(true)
+        const result = await api<{ results: Chunk[]; elapsed_ms?: number }>(`/api/index/${documentId}/search`, { query, top_k: 5, method: retrievalMethod, group_pages: true })
+        setResults(result.results); setElapsed(result.elapsed_ms ?? null); setSearched(true)
       }
     } catch (error) { setError((error as Error).message) }
     finally { setBusy(false); onBusyChange?.(false) }
@@ -110,14 +112,18 @@ export function DocumentIndex({ documentId, pageCount, sourceVersion, embedded =
       </details>)}
       {chunks.length > limit && <Button variant="secondary" onClick={() => setLimit(limit + 10)}>Show more chunks</Button>}
       </details>
+      <label className="pdf-method-label">Retrieval method <select value={retrievalMethod} disabled={busy} onChange={event => { setRetrievalMethod(event.target.value); setResults([]); setSearched(false) }}>
+        <option value="dense">Semantic (dense)</option><option value="keyword">Keyword (BM25)</option><option value="hybrid">Hybrid (rank fusion)</option>
+      </select></label>
       <form className="pdf-search-form" onSubmit={event => { event.preventDefault(); run('search') }}>
         <label>Test similarity search <input value={query} maxLength={4000} onChange={event => setQuery(event.target.value)} placeholder="When should I use binary search?" /></label>
         <Button type="submit" disabled={busy || loadingStatus || status?.state !== 'ready' || !query.trim()}>Search indexed passages</Button>
       </form>
       <p className="pdf-muted pdf-help">Returns source passages, which may include solutions. AI answers come later.</p>
+      {searched && <p className="pdf-muted">Evidence unverified · {elapsed !== null ? `${elapsed.toFixed(1)} ms ranking time` : 'Inspect source pages'}</p>}
       {searched && !results.length && <p>No passages found.</p>}
       {results.map((chunk, i) => <article className="pdf-search-result" key={i}>
-        <p>Result {i + 1} · PDF page {chunk.metadata.pages.join(', ')} · Similarity {chunk.score?.toFixed(3)} · {chunk.metadata.review_status}</p>
+        <p>Result {i + 1} · PDF page {chunk.metadata.pages.join(', ')} · {chunk.score_type === 'bm25_plus' ? 'BM25' : chunk.score_type === 'reciprocal_rank_fusion' ? 'Fusion' : 'Similarity'} {chunk.score?.toFixed(3)} · {chunk.metadata.review_status}</p>
         <a href={`/api/documents/${documentId}/original#page=${chunk.metadata.pages[0]}`} target="_blank" rel="noreferrer">Open supporting page</a>
         <pre>{chunk.text}</pre>
       </article>)}

@@ -3,6 +3,7 @@ import { BookOpen, FileText, Search, ChevronRight } from 'lucide-react'
 import { Button } from '../../components/Button'
 import './documents.css'
 import { DocumentIndex } from './DocumentIndex'
+import { RetrievalComparison } from './RetrievalComparison'
 
 type Summary = { id: string; filename: string; page_count: number; status: string; unreviewed: number; needs_attention?: number; spot_check?: number; error: string | null }
 type PageSummary = { number: number; review_status: string; needs_attention: boolean; attention_reasons: string[]; priority: string }
@@ -98,6 +99,7 @@ export function LocalDocuments() {
       {!selected && <>
         <div className="pdf-list-toolbar"><span className="pdf-muted">{documents.length} documents · Stored locally</span><Button variant="secondary" disabled={busy} onClick={() => setRefresh(refresh + 1)}>Refresh PDFs</Button></div>
         {!busy && !error && !documents.length && <p>No PDFs imported yet.</p>}
+        <RetrievalComparison documents={documents} />
         <ul className="pdf-document-list">{documents.map(doc => <li key={doc.id}>
           <Button variant="secondary" disabled={busy || !doc.page_count} onClick={() => { setSelected(doc); setNumber(1); setFilter('all'); setView('read'); setIndexVisited(false) }}><FileText size={20} aria-hidden="true" /><span>{doc.filename}</span><ChevronRight size={18} aria-hidden="true" /></Button>
           <p className="pdf-muted">{doc.page_count} pages <span className="pdf-badge">{doc.status === 'ready' ? 'Imported' : doc.status.replaceAll('_', ' ')}</span>{!!doc.needs_attention && <span>{doc.needs_attention} need attention</span>}</p>

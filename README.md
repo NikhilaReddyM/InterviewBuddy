@@ -318,3 +318,7 @@ Resources & Revision includes a local PDF reader with page extraction, Apple Vis
 ## Local chunking and indexing (Phase 3)
 
 The PDF reader now includes page-range selection, chunk previews, optional experimental unreviewed inclusion, persistent local embeddings, stale-index detection, and a passage-search diagnostic. See [Phase 3 setup and behavior](documentation/chunking-indexing-phase3.md). Answers are not generated yet.
+
+## Retrieval comparison (Phase 4)
+
+Search indexed PDFs with local dense, BM25 keyword, or hybrid retrieval. Compare multiple documents and run reproducible source-page evaluations; see [Phase 4 instructions](documentation/retrieval-phase4.md). Draft evaluation labels require review, and passage matches are not proof of answerability.
