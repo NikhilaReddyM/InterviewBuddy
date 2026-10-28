@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+# Private study documents and generated RAG data (kept on this machine)
+/src/docs/
+/docs/
+/backend/data/
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
