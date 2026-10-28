@@ -16,6 +16,8 @@ dist-ssr
 /src/docs/
 /docs/
 /backend/data/
+/backend/.venv/
+__pycache__/
 .env
 .env.*
 !.env.example
