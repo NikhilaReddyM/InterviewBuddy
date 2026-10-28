@@ -11,7 +11,7 @@ backend/.venv/bin/python backend/documents.py serve
 
 Run `npm run dev` in another terminal. Restart an older backend to load the new endpoints.
 
-Open Resources & Revision → Open PDF library → choose a PDF → Index this PDF.
+Open Resources & Revision → Open PDF library → choose a PDF → Index & search.
 
 1. Select a physical PDF page range (initially pages 1–10).
 2. Choose reviewed pages only, or explicitly enable experimental unreviewed inclusion. You do not need to finish the entire review queue.
@@ -40,3 +40,5 @@ Semantic answers, hybrid retrieval, reranking, section classification, and faith
 
 Model reference: https://huggingface.co/BAAI/bge-small-en-v1.5
 FastEmbed reference: https://qdrant.github.io/fastembed/examples/Supported_Models/
+
+The workspace separates Read & review from Index & search. Saved index status is displayed above the build controls; settings and passage previews are expandable. The saved page range loads automatically when opening indexing, and switching back to reading preserves the indexing form. Review drafts prompt before being discarded when switching views.

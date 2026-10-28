@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { BookOpen, FileText, Search, ChevronRight } from 'lucide-react'
 import { Button } from '../../components/Button'
 import './documents.css'
 import { DocumentIndex } from './DocumentIndex'
@@ -17,6 +18,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 export function LocalDocuments() {
   const [opened, setOpened] = useState(false)
+  const [view, setView] = useState<'read' | 'index'>('read')
+  const [indexVisited, setIndexVisited] = useState(false)
+  const [indexBusy, setIndexBusy] = useState(false)
+  const [savedVersion, setSavedVersion] = useState(0)
   const [documents, setDocuments] = useState<Summary[]>([])
   const [selected, setSelected] = useState<Summary | null>(null)
   const [number, setNumber] = useState(1)
@@ -64,6 +69,12 @@ export function LocalDocuments() {
       .finally(() => { if (!controller.signal.aborted) setBusy(false) })
     return () => controller.abort()
   }, [opened, selected, number, refresh])
+  function changeView(next: 'read' | 'index') {
+    if (next === view || !mayLeave()) return
+    if (page) { setText(page.text); setMethod(page.method); setStatus(page.review_status) }
+    setView(next)
+    if (next === 'index') setIndexVisited(true)
+  }
   async function save() {
     if (!page || !selected) return
     setBusy(true); setError(''); setNotice('')
@@ -72,32 +83,36 @@ export function LocalDocuments() {
         method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-InterviewBuddy': 'local' },
         body: JSON.stringify({ text, method, review_status: status, revision: page.revision }),
       })
-      setPage(result); setText(result.text); setNotice('Page corrections and review status saved locally.')
+      setPage(result); setText(result.text); setSavedVersion(value => value + 1); setNotice('Page corrections and review status saved locally.')
     } catch (error) { setError((error as Error).message) }
     finally { setBusy(false) }
   }
   return <section className="card pdf-library" aria-label="Local PDF library">
-    <h2>Local PDF library</h2>
-    <p>Imported PDFs and corrections live on this machine, separately from browser backups. Select a PDF to review pages or build a local search index.</p>
-    <Button variant="secondary" disabled={busy} onClick={() => { if (mayLeave()) { setOpened(!opened); setSelected(null); setPage(null) } }}>{opened ? 'Close PDF library' : 'Open PDF library'}</Button>
+    <div className="pdf-library-header"><div><h2><BookOpen size={22} aria-hidden="true" /> Local PDF library</h2>
+    <p className="pdf-muted">Your study documents, ready to read and search.</p></div>
+    <Button variant="secondary" disabled={busy || indexBusy} aria-expanded={opened} onClick={() => { if (mayLeave()) { setOpened(!opened); setSelected(null); setPage(null) } }}>{opened ? 'Close PDF library' : 'Open PDF library'}</Button></div>
     {opened && <>
       {busy && <p role="status">Loading or saving…</p>}
-      {error && <p role="alert">{error}</p>}
-      <p role="status">{notice}</p>
+      {error && <div className="pdf-error" role="alert"><p>{error}</p><Button variant="secondary" disabled={busy} onClick={() => { if (mayLeave()) setRefresh(value => value + 1) }}>Try again</Button><details><summary>Backend setup</summary><p>Run this from the project folder, then retry:</p><code>backend/.venv/bin/python backend/documents.py serve</code></details></div>}
+      {notice && <p className="pdf-notice" role="status">{notice}</p>}
       {!selected && <>
-        <p>Choose a PDF, then use Needs attention to focus your review. Use Refresh PDFs after importing new files.</p>
-        <Button variant="secondary" disabled={busy} onClick={() => setRefresh(refresh + 1)}>Refresh PDFs</Button>
+        <div className="pdf-list-toolbar"><span className="pdf-muted">{documents.length} documents · Stored locally</span><Button variant="secondary" disabled={busy} onClick={() => setRefresh(refresh + 1)}>Refresh PDFs</Button></div>
         {!busy && !error && !documents.length && <p>No PDFs imported yet.</p>}
-        <ul>{documents.map(doc => <li key={doc.id}>
-          <Button variant="secondary" disabled={busy || !doc.page_count} onClick={() => { setSelected(doc); setNumber(1); setFilter('all') }}>{doc.filename}</Button>
-          <p>{doc.page_count} pages · {doc.status} · {doc.needs_attention ?? 0} need attention · {doc.spot_check ?? 0} for spot-checking</p>
+        <ul className="pdf-document-list">{documents.map(doc => <li key={doc.id}>
+          <Button variant="secondary" disabled={busy || !doc.page_count} onClick={() => { setSelected(doc); setNumber(1); setFilter('all'); setView('read'); setIndexVisited(false) }}><FileText size={20} aria-hidden="true" /><span>{doc.filename}</span><ChevronRight size={18} aria-hidden="true" /></Button>
+          <p className="pdf-muted">{doc.page_count} pages <span className="pdf-badge">{doc.status === 'ready' ? 'Imported' : doc.status.replaceAll('_', ' ')}</span>{!!doc.needs_attention && <span>{doc.needs_attention} need attention</span>}</p>
           {doc.error && <p>{doc.error}</p>}
         </li>)}</ul>
       </>}
       {selected && <>
-        <h3>{selected.filename}</h3>
-        <DocumentIndex key={selected.id} documentId={selected.id} pageCount={selected.page_count} sourceVersion={`${number}-${page?.revision ?? 0}`} />
-        <p>You do not need to review every page. Focus on flagged pages and spot-check the rest. These signals can miss errors; they do not certify accuracy.</p>
+        <div className="pdf-document-header"><Button variant="secondary" disabled={busy || indexBusy} onClick={() => { if (mayLeave()) { setSelected(null); setPage(null) } }}>Back to PDFs</Button><h3>{selected.filename}</h3><a href={`/api/documents/${selected.id}/original#page=${number}`} target="_blank" rel="noreferrer">Open original PDF</a></div>
+        <div className="pdf-view-switch" role="group" aria-label="Document workspace">
+          <Button variant="secondary" aria-pressed={view === 'read'} disabled={indexBusy} onClick={() => changeView('read')}><BookOpen size={17} aria-hidden="true" />Read & review</Button>
+          <Button variant="secondary" aria-pressed={view === 'index'} disabled={busy || indexBusy} onClick={() => changeView('index')}><Search size={17} aria-hidden="true" />Index & search</Button>
+        </div>
+        {indexVisited && <div hidden={view !== 'index'}><DocumentIndex key={selected.id} documentId={selected.id} pageCount={selected.page_count} sourceVersion={String(savedVersion)} embedded onBusyChange={setIndexBusy} /></div>}
+        <div hidden={view !== 'read'}>
+        <div className="pdf-reader-toolbar">
         <label>Review filter <select disabled={busy} value={filter} onChange={event => {
           if (!mayLeave()) return
           const value = event.target.value as PageFilter
@@ -113,22 +128,22 @@ export function LocalDocuments() {
         {!matches.length && <p>No pages match this filter. Choose All pages to browse the document.</p>}
         {!currentMatches && <p>The current page is outside this filter. Your saved review remains visible; choose another page or change the filter.</p>}
         <div className="actions">
-          <Button variant="secondary" disabled={busy} onClick={() => { if (mayLeave()) { setSelected(null); setPage(null) } }}>Back to PDFs</Button>
           <Button variant="secondary" disabled={busy || previous === undefined} onClick={() => { if (mayLeave()) setNumber(previous!) }}>Previous page</Button>
           <label>PDF page <select disabled={busy} value={number} onChange={event => { if (mayLeave()) setNumber(Number(event.target.value)) }}>
             {!currentMatches && <option value={number}>{number} (current page)</option>}
             {matches.map(p => <option key={p.number} value={p.number}>{p.number}{p.needs_attention ? ' — needs attention' : ''}</option>)}
           </select> of {selected.page_count}</label>
           <Button variant="secondary" disabled={busy || next === undefined} onClick={() => { if (mayLeave()) setNumber(next!) }}>Next page</Button>
-          <a href={`/api/documents/${selected.id}/original#page=${number}`} target="_blank" rel="noreferrer">Open original PDF</a>
+        </div>
         </div>
         {page && <>
-          <h4>Review priority</h4>
-          {page.attention_reasons?.length ? <ul>{page.attention_reasons.map(reason => <li key={reason}>{reason}</li>)}</ul> : <p>No automated attention flags. Spot-checking is still recommended.</p>}
-          <details><summary>Extraction notes</summary><ul>{page.issues.map(issue => <li key={issue}>{issue}</li>)}</ul></details>
+          <details className="pdf-review-notes"><summary>{page.attention_reasons?.length ? `${page.attention_reasons.length} review signals — optional checks` : 'Review guidance'}</summary>
+          <p>Review only what you need. Automated signals prioritize checks; they do not certify accuracy.</p>
+          {!!page.attention_reasons?.length && <ul>{page.attention_reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>}
+          <ul>{page.issues.map(issue => <li key={issue}>{issue}</li>)}</ul></details>
           <div className="pdf-page-grid">
-            <a href={`/api/documents/${selected.id}/pages/${number}/image`} target="_blank" rel="noreferrer"><img src={`/api/documents/${selected.id}/pages/${number}/image`} alt={`Original PDF page ${number} of ${selected.filename}`} /></a>
-            <div>
+            <div className="pdf-original"><h4>Original · Page {number}</h4><a href={`/api/documents/${selected.id}/pages/${number}/image`} target="_blank" rel="noreferrer"><img src={`/api/documents/${selected.id}/pages/${number}/image`} alt={`Original PDF page ${number} of ${selected.filename}`} /></a><p className="pdf-muted">Select the image to enlarge.</p></div>
+            <div className="pdf-editor">
               <label>Text source <select disabled={busy} value={method} onChange={event => {
                 if (window.confirm('Replace the editor text with this raw extraction?')) {
                   const next = event.target.value as 'direct' | 'ocr'; setMethod(next); setText(page[`${next}_text`]); setStatus('unreviewed')
@@ -138,13 +153,14 @@ export function LocalDocuments() {
               <label>Review status <select disabled={busy} value={status} onChange={event => setStatus(event.target.value)}>
                 <option value="unreviewed">Not reviewed</option><option value="flagged">Flagged for follow-up</option><option value="reviewed">Reviewed</option><option value="confirmed_blank">Confirmed blank</option>
               </select></label>
-              <p>Confirm blank only after checking the image and clearing the reviewed text. Code and diagrams require visual verification.</p>
+              {status === 'confirmed_blank' && <p className="pdf-muted">Clear the text after confirming the original page is blank.</p>}
+              {dirty && <p className="pdf-unsaved">Unsaved changes</p>}
               <Button disabled={busy || !dirty || (status === 'confirmed_blank' && !!text.trim())} onClick={save}>Save page review</Button>
-              <details><summary>Raw direct extraction</summary><pre>{page.direct_text || 'No direct text.'}</pre></details>
-              <details><summary>Raw OCR extraction</summary><pre>{page.ocr_text || 'No OCR text.'}</pre></details>
+              <details className="pdf-raw"><summary>Compare raw extractions</summary><h4>Direct text</h4><pre>{page.direct_text || 'No direct text.'}</pre><h4>OCR text</h4><pre>{page.ocr_text || 'No OCR text.'}</pre></details>
             </div>
           </div>
         </>}
+        </div>
       </>}
     </>}
   </section>

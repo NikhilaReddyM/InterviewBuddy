@@ -33,3 +33,14 @@ it('shows stale indexes and blocks search', async () => {
   await screen.findByText(/Stale — source pages changed/)
   expect(screen.getByText('Search indexed passages')).toBeDisabled()
 })
+it('restores the saved page range and keeps model details collapsed', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ state: 'ready', chunks: [chunk], included: 5,
+    skipped: [], selection: { start_page: 8, end_page: 12, include_unreviewed: true } })))
+  render(<DocumentIndex documentId="d" pageCount={59} sourceVersion="0" embedded />)
+  await screen.findByText('Saved index: 1 chunks ready')
+  expect(screen.getByLabelText('First PDF page')).toHaveValue(8)
+  expect(screen.getByLabelText('Last PDF page')).toHaveValue(12)
+  expect(screen.getByLabelText('Include unreviewed pages experimentally')).toBeChecked()
+  expect(screen.getByText('Index settings & inclusion rules').parentElement).not.toHaveAttribute('open')
+  expect(screen.getByText('Browse passages (1)').parentElement).not.toHaveAttribute('open')
+})

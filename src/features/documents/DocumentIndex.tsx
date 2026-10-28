@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../components/Button'
 
 type Chunk = { id?: string; text: string; metadata: { pages: number[]; token_count: number; review_status: string; method: string; experimental: boolean; content_type: string; split_page: boolean }; score?: number }
@@ -14,8 +14,11 @@ async function api<T>(path: string, body?: unknown, signal?: AbortSignal): Promi
   return result
 }
 
-export function DocumentIndex({ documentId, pageCount, sourceVersion }: { documentId: string; pageCount: number; sourceVersion: string }) {
-  const [opened, setOpened] = useState(false)
+export function DocumentIndex({ documentId, pageCount, sourceVersion, embedded = false, onBusyChange }: { documentId: string; pageCount: number; sourceVersion: string; embedded?: boolean; onBusyChange?: (busy: boolean) => void }) {
+  const [opened, setOpened] = useState(embedded)
+  const initialized = useRef(false)
+  const [refresh, setRefresh] = useState(0)
+  const [loadingStatus, setLoadingStatus] = useState(false)
   const [start, setStart] = useState(1)
   const [end, setEnd] = useState(Math.min(10, pageCount))
   const [experimental, setExperimental] = useState(false)
@@ -31,15 +34,26 @@ export function DocumentIndex({ documentId, pageCount, sourceVersion }: { docume
   useEffect(() => {
     if (!opened) return
     const controller = new AbortController()
+    // Synchronize status feedback with the backend request.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setLoadingStatus(true)
+    setError('')
     api<Status>(`/api/index/${documentId}`, undefined, controller.signal).then(result => {
-      if (!controller.signal.aborted) { setStatus(result); setPlan(null); setResults([]); setSearched(false) }
+      if (!controller.signal.aborted) {
+        setStatus(result); setPlan(null); setResults([]); setSearched(false)
+        if (!initialized.current && result.selection) {
+          setStart(result.selection.start_page); setEnd(result.selection.end_page); setExperimental(result.selection.include_unreviewed)
+        }
+        initialized.current = true
+      }
     }).catch(error => { if (!controller.signal.aborted) setError(error.message) })
+      .finally(() => { if (!controller.signal.aborted) setLoadingStatus(false) })
     return () => controller.abort()
-  }, [opened, documentId, sourceVersion])
+  }, [opened, documentId, sourceVersion, refresh])
   const selection = { document_id: documentId, start_page: start, end_page: end, include_unreviewed: experimental }
   function changed() { setPlan(null); setNotice(''); setLimit(10) }
   async function run(action: 'preview' | 'build' | 'search') {
-    setBusy(true); setError(''); setNotice('')
+    setBusy(true); onBusyChange?.(true); setError(''); setNotice('')
     try {
       if (action === 'preview') {
         setPlan(await api<Plan>('/api/index/preview', selection)); setLimit(10)
@@ -52,36 +66,42 @@ export function DocumentIndex({ documentId, pageCount, sourceVersion }: { docume
         setResults(result.results); setSearched(true)
       }
     } catch (error) { setError((error as Error).message) }
-    finally { setBusy(false) }
+    finally { setBusy(false); onBusyChange?.(false) }
   }
   const chunks = plan?.chunks ?? status?.chunks ?? []
   return <section className="pdf-index" aria-label="Document indexing">
-    <h4>Chunking and indexing</h4>
-    <Button variant="secondary" disabled={busy} onClick={() => setOpened(!opened)}>{opened ? 'Close indexing' : 'Index this PDF'}</Button>
+    {!embedded && <><h4>Chunking and indexing</h4>
+    <Button variant="secondary" disabled={busy} onClick={() => setOpened(!opened)}>{opened ? 'Close indexing' : 'Index this PDF'}</Button></>}
     {opened && <>
-      <p>Select saved pages to turn into searchable passages. Unreviewed content is optional; you do not have to clear the review queue.</p>
-      <p>Embeddings run on this machine using BGE-small. The first run downloads model files. No PDF text is uploaded.</p>
-      {error && <p role="alert">{error}</p>}
-      <p role="status">{busy ? 'Processing locally… Keep this panel open until it finishes.' : notice}</p>
-      <fieldset disabled={busy}>
+      <div className="pdf-index-heading"><div><h4>Make this PDF searchable</h4><p className="pdf-muted">Choose pages, preview passages, then build your index.</p></div><span className="pdf-badge">Local processing</span></div>
+      {loadingStatus && <p role="status">Checking saved index…</p>}
+      {error && <div className="pdf-error" role="alert"><p>{error}</p><Button variant="secondary" disabled={busy || loadingStatus} onClick={() => setRefresh(value => value + 1)}>Refresh index status</Button></div>}
+      {(busy || notice) && <p className="pdf-notice" role="status">{busy ? 'Processing locally…' : notice}</p>}
+      {status && <div className={`pdf-index-status ${status.state === 'stale' ? 'pdf-index-stale' : ''}`}><strong>Saved index: {status.state === 'not_indexed' ? 'Not built' : status.state === 'stale' ? 'Stale — source pages changed; rebuild before searching' : `${status.chunks.length} chunks ready`}</strong>
+      {status.selection && <p>PDF pages {status.selection.start_page}–{status.selection.end_page} · {status.included} included · {status.skipped?.length ?? 0} skipped</p>}
+      {status.built_at && <small>Updated {new Date(status.built_at).toLocaleString()}</small>}</div>}
+      <fieldset disabled={busy || loadingStatus} className="pdf-index-selection">
         <legend>Pages to index</legend>
-        <label>First PDF page <input type="number" min={1} max={pageCount} value={start} onChange={event => { setStart(Number(event.target.value)); changed() }} /></label>
-        <label>Last PDF page <input type="number" min={start} max={pageCount} value={end} onChange={event => { setEnd(Number(event.target.value)); changed() }} /></label>
-        <label><input type="checkbox" checked={experimental} onChange={event => { setExperimental(event.target.checked); changed() }} /> Include unreviewed pages experimentally</label>
+        <div className="pdf-page-range"><label>First PDF page <input type="number" min={1} max={pageCount} value={start} onChange={event => { setStart(Number(event.target.value)); changed() }} /></label>
+        <label>Last PDF page <input type="number" min={start} max={pageCount} value={end} onChange={event => { setEnd(Number(event.target.value)); changed() }} /></label></div>
+        <label className="pdf-checkbox"><input type="checkbox" checked={experimental} onChange={event => { setExperimental(event.target.checked); changed() }} /> Include unreviewed pages experimentally</label>
       </fieldset>
-      <p>Confirmed blank pages, manually flagged pages, empty text, and extraction failures are excluded. Builds use saved corrections, not unsaved editor text.</p>
+
       <div className="actions">
-        <Button disabled={busy || start < 1 || end < start || end > pageCount} variant="secondary" onClick={() => run('preview')}>Preview chunks</Button>
-        <Button disabled={busy || !plan?.chunks.length} onClick={() => run('build')}>Build / replace index</Button>
+        <Button disabled={busy || loadingStatus || start < 1 || end < start || end > pageCount} variant="secondary" onClick={() => run('preview')}>Preview chunks</Button>
+        <Button disabled={busy || loadingStatus || !plan?.chunks.length} onClick={() => run('build')}>Build / replace index</Button>
       </div>
-      <p>Each PDF has one active index. Building replaces its previous page selection after successful embedding.</p>
+      <p className="pdf-muted pdf-help">Preview first to enable Build. A successful build replaces this PDF’s saved page selection.</p>
       {plan && <>
         <p>{plan.included_pages.length} pages included · {plan.skipped_pages.length} skipped · {plan.chunks.length} chunks</p>
         {!!plan.skipped_pages.length && <details><summary>Skipped pages and reasons</summary><ul>{plan.skipped_pages.map(p => <li key={p.page}>PDF page {p.page}: {p.reason}</li>)}</ul></details>}
       </>}
-      {status && <p>Saved index: {status.state === 'not_indexed' ? 'Not built' : status.state === 'stale' ? 'Stale — source pages changed; rebuild before searching' : `${status.chunks.length} chunks ready`}{status.built_at ? ` · Built ${new Date(status.built_at).toLocaleString()}` : ''}</p>}
-      {status?.selection && <p>Saved selection: PDF pages {status.selection.start_page}–{status.selection.end_page} · {status.included} included · {status.skipped?.length ?? 0} skipped · {status.selection.include_unreviewed ? 'Experimental unreviewed inclusion enabled' : 'Reviewed pages only'}</p>}
-      {(plan?.config ?? status?.config) && <p>Model: {(plan?.config ?? status?.config)?.model} · Up to {(plan?.config ?? status?.config)?.max_tokens} model tokens per chunk · {(plan?.config ?? status?.config)?.overlap_tokens} token overlap within split pages</p>}
+      <details className="pdf-technical"><summary>Index settings & inclusion rules</summary>
+      <p>Uses saved text. Blank, manually flagged, empty, and failed-extraction pages are skipped. Unreviewed pages are included only when selected above.</p>
+      <p>Embeddings run locally using BGE-small; the first run downloads model files. No PDF text is uploaded.</p>
+      {(plan?.config ?? status?.config) && <p>Model: {(plan?.config ?? status?.config)?.model} · Maximum {(plan?.config ?? status?.config)?.max_tokens} tokens · {(plan?.config ?? status?.config)?.overlap_tokens} token overlap</p>}
+      </details>
+      <details className="pdf-chunk-list"><summary>{plan ? 'Preview' : 'Browse'} passages ({chunks.length})</summary>
       {chunks.slice(0, limit).map((chunk, i) => <details key={chunk.id ?? i}>
         <summary>Chunk {i + 1} · PDF page {chunk.metadata.pages.join(', ')} · {chunk.metadata.token_count} tokens · {chunk.metadata.review_status}</summary>
         <p>{chunk.metadata.experimental ? 'Experimental, unreviewed text.' : 'Reviewed source text.'} Section type: {chunk.metadata.content_type}.{chunk.metadata.split_page ? ' Long page split; check code continuity.' : ''}</p>
@@ -89,13 +109,14 @@ export function DocumentIndex({ documentId, pageCount, sourceVersion }: { docume
         <pre>{chunk.text}</pre>
       </details>)}
       {chunks.length > limit && <Button variant="secondary" onClick={() => setLimit(limit + 10)}>Show more chunks</Button>}
-      <form onSubmit={event => { event.preventDefault(); run('search') }}>
+      </details>
+      <form className="pdf-search-form" onSubmit={event => { event.preventDefault(); run('search') }}>
         <label>Test similarity search <input value={query} maxLength={4000} onChange={event => setQuery(event.target.value)} placeholder="When should I use binary search?" /></label>
-        <Button type="submit" disabled={busy || status?.state !== 'ready' || !query.trim()}>Search indexed passages</Button>
+        <Button type="submit" disabled={busy || loadingStatus || status?.state !== 'ready' || !query.trim()}>Search indexed passages</Button>
       </form>
-      <p>This diagnostic returns passages, not AI answers. Similarity scores are not confidence or proof of relevance. Unknown sections may contain solutions.</p>
+      <p className="pdf-muted pdf-help">Returns source passages, which may include solutions. AI answers come later.</p>
       {searched && !results.length && <p>No passages found.</p>}
-      {results.map((chunk, i) => <article key={i}>
+      {results.map((chunk, i) => <article className="pdf-search-result" key={i}>
         <p>Result {i + 1} · PDF page {chunk.metadata.pages.join(', ')} · Similarity {chunk.score?.toFixed(3)} · {chunk.metadata.review_status}</p>
         <a href={`/api/documents/${documentId}/original#page=${chunk.metadata.pages[0]}`} target="_blank" rel="noreferrer">Open supporting page</a>
         <pre>{chunk.text}</pre>
