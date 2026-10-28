@@ -40,10 +40,12 @@ function App() {
   useEffect(() => { document.title = `${section.label} · Interview Prep Companion` }, [section.label])
 
   function navigate(next: Screen) {
+    if (!window.dispatchEvent(new Event('interviewbuddy:before-navigate', { cancelable: true }))) return
     setNavigation((history) => history[history.length - 1] === next ? history : [...history, next])
     requestAnimationFrame(() => heading.current?.focus())
   }
   function goBack() {
+    if (!window.dispatchEvent(new Event('interviewbuddy:before-navigate', { cancelable: true }))) return
     setNavigation((history) => history.length > 1 ? history.slice(0, -1) : history)
     requestAnimationFrame(() => heading.current?.focus())
   }

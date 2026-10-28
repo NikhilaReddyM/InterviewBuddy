@@ -12,6 +12,7 @@ import { ResourceForm } from './ResourceForm'
 import { emptyFilters, filterResources } from './filterResources'
 import type { ResourceFilters } from './filterResources'
 import './resources.css'
+import { LocalDocuments } from '../documents/LocalDocuments'
 
 type Editor = { type: 'add' } | { type: 'edit' | 'delete' | 'schedule'; id: string }
 export function ResourceLibrary() {
@@ -27,6 +28,7 @@ export function ResourceLibrary() {
   function saved(message: string) { setEditor(null); setNotice(message); setActionError('') }
   function open(next: Editor) { setEditor(next); setActionError('') }
   return <div className="resource-library">
+    <LocalDocuments />
     <div className="library-toolbar"><p>Save your own notes and links. Revisit them when you’re ready.</p><Button disabled={blocked} onClick={() => open({ type: 'add' })}>Add resource</Button></div>
     <section className="card library-filters" aria-label="Resource filters">
       <Field id="resource-search" label="Search resources"><input id="resource-search" type="search" placeholder="Title, tags, or notes" value={filters.search} onChange={(event) => filter('search', event.target.value)} /></Field>

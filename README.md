@@ -310,3 +310,7 @@ submission validation, search/filter/reset, persisted reloads, Dashboard resched
 reminder completion, dirty cancellation, and failed-save retry. Browser visual,
 focus, and downloaded-file checks remain manual; harmless Zod annotation warnings
 continue during build.
+
+## Local PDF library (Phase 2)
+
+Resources & Revision includes a local PDF reader with page extraction, Apple Vision OCR, and saved corrections/review status. This optional feature requires the local Python backend; the original planner and notes continue working independently. See [setup and checkpoint instructions](documentation/local-pdf-library.md). PDFs, extracted content, and SQLite data remain excluded from Git and browser backups. RAG search and AI answers are not implemented yet.
