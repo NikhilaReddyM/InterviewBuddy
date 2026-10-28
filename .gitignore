@@ -17,6 +17,7 @@ dist-ssr
 /docs/
 /backend/data/
 /backend/.venv/
+/backend/.venv-eval/
 __pycache__/
 .env*
 !.env.example
