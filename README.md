@@ -322,3 +322,7 @@ The PDF reader now includes page-range selection, chunk previews, optional exper
 ## Retrieval comparison (Phase 4)
 
 Search indexed PDFs with local dense, BM25 keyword, or hybrid retrieval. Compare multiple documents and run reproducible source-page evaluations; see [Phase 4 instructions](documentation/retrieval-phase4.md). Draft evaluation labels require review, and passage matches are not proof of answerability.
+
+## Cited answers (Phase 5)
+
+The PDF library includes **Ask my PDFs**, using LangChain, hybrid retrieval over the three Dynamic Programming PDFs, and configurable Groq generation. Answers include source-page citations, exact evidence quotes, and unreviewed-source labels. See [Groq setup and usage](documentation/cited-qa-phase5.md) and the [Week 2 submission draft](documentation/week2-submission-draft.md). Generation tests are mocked; configure your own local API key/model to try real answers. Tracing and systematic answer evaluation are deferred.

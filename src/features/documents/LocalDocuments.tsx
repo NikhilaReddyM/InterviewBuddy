@@ -4,6 +4,7 @@ import { Button } from '../../components/Button'
 import './documents.css'
 import { DocumentIndex } from './DocumentIndex'
 import { RetrievalComparison } from './RetrievalComparison'
+import { AskDocuments } from './AskDocuments'
 
 type Summary = { id: string; filename: string; page_count: number; status: string; unreviewed: number; needs_attention?: number; spot_check?: number; error: string | null }
 type PageSummary = { number: number; review_status: string; needs_attention: boolean; attention_reasons: string[]; priority: string }
@@ -22,6 +23,7 @@ export function LocalDocuments() {
   const [view, setView] = useState<'read' | 'index'>('read')
   const [indexVisited, setIndexVisited] = useState(false)
   const [indexBusy, setIndexBusy] = useState(false)
+  const [qaBusy, setQaBusy] = useState(false)
   const [savedVersion, setSavedVersion] = useState(0)
   const [documents, setDocuments] = useState<Summary[]>([])
   const [selected, setSelected] = useState<Summary | null>(null)
@@ -91,7 +93,7 @@ export function LocalDocuments() {
   return <section className="card pdf-library" aria-label="Local PDF library">
     <div className="pdf-library-header"><div><h2><BookOpen size={22} aria-hidden="true" /> Local PDF library</h2>
     <p className="pdf-muted">Your study documents, ready to read and search.</p></div>
-    <Button variant="secondary" disabled={busy || indexBusy} aria-expanded={opened} onClick={() => { if (mayLeave()) { setOpened(!opened); setSelected(null); setPage(null) } }}>{opened ? 'Close PDF library' : 'Open PDF library'}</Button></div>
+    <Button variant="secondary" disabled={busy || indexBusy || qaBusy} aria-expanded={opened} onClick={() => { if (mayLeave()) { setOpened(!opened); setSelected(null); setPage(null) } }}>{opened ? 'Close PDF library' : 'Open PDF library'}</Button></div>
     {opened && <>
       {busy && <p role="status">Loading or saving…</p>}
       {error && <div className="pdf-error" role="alert"><p>{error}</p><Button variant="secondary" disabled={busy} onClick={() => { if (mayLeave()) setRefresh(value => value + 1) }}>Try again</Button><details><summary>Backend setup</summary><p>Run this from the project folder, then retry:</p><code>backend/.venv/bin/python backend/documents.py serve</code></details></div>}
@@ -99,18 +101,19 @@ export function LocalDocuments() {
       {!selected && <>
         <div className="pdf-list-toolbar"><span className="pdf-muted">{documents.length} documents · Stored locally</span><Button variant="secondary" disabled={busy} onClick={() => setRefresh(refresh + 1)}>Refresh PDFs</Button></div>
         {!busy && !error && !documents.length && <p>No PDFs imported yet.</p>}
+        <AskDocuments onBusyChange={setQaBusy} />
         <RetrievalComparison documents={documents} />
         <ul className="pdf-document-list">{documents.map(doc => <li key={doc.id}>
-          <Button variant="secondary" disabled={busy || !doc.page_count} onClick={() => { setSelected(doc); setNumber(1); setFilter('all'); setView('read'); setIndexVisited(false) }}><FileText size={20} aria-hidden="true" /><span>{doc.filename}</span><ChevronRight size={18} aria-hidden="true" /></Button>
+          <Button variant="secondary" disabled={busy || qaBusy || !doc.page_count} onClick={() => { setSelected(doc); setNumber(1); setFilter('all'); setView('read'); setIndexVisited(false) }}><FileText size={20} aria-hidden="true" /><span>{doc.filename}</span><ChevronRight size={18} aria-hidden="true" /></Button>
           <p className="pdf-muted">{doc.page_count} pages <span className="pdf-badge">{doc.status === 'ready' ? 'Imported' : doc.status.replaceAll('_', ' ')}</span>{!!doc.needs_attention && <span>{doc.needs_attention} need attention</span>}</p>
           {doc.error && <p>{doc.error}</p>}
         </li>)}</ul>
       </>}
       {selected && <>
-        <div className="pdf-document-header"><Button variant="secondary" disabled={busy || indexBusy} onClick={() => { if (mayLeave()) { setSelected(null); setPage(null) } }}>Back to PDFs</Button><h3>{selected.filename}</h3><a href={`/api/documents/${selected.id}/original#page=${number}`} target="_blank" rel="noreferrer">Open original PDF</a></div>
+        <div className="pdf-document-header"><Button variant="secondary" disabled={busy || indexBusy || qaBusy} onClick={() => { if (mayLeave()) { setSelected(null); setPage(null) } }}>Back to PDFs</Button><h3>{selected.filename}</h3><a href={`/api/documents/${selected.id}/original#page=${number}`} target="_blank" rel="noreferrer">Open original PDF</a></div>
         <div className="pdf-view-switch" role="group" aria-label="Document workspace">
           <Button variant="secondary" aria-pressed={view === 'read'} disabled={indexBusy} onClick={() => changeView('read')}><BookOpen size={17} aria-hidden="true" />Read & review</Button>
-          <Button variant="secondary" aria-pressed={view === 'index'} disabled={busy || indexBusy} onClick={() => changeView('index')}><Search size={17} aria-hidden="true" />Index & search</Button>
+          <Button variant="secondary" aria-pressed={view === 'index'} disabled={busy || indexBusy || qaBusy} onClick={() => changeView('index')}><Search size={17} aria-hidden="true" />Index & search</Button>
         </div>
         {indexVisited && <div hidden={view !== 'index'}><DocumentIndex key={selected.id} documentId={selected.id} pageCount={selected.page_count} sourceVersion={String(savedVersion)} embedded onBusyChange={setIndexBusy} /></div>}
         <div hidden={view !== 'read'}>

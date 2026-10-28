@@ -301,3 +301,6 @@ def register(app, connect, data):
     @app.post('/api/retrieval/search')
     def corpus_search(request: CorpusSearch):
         return retrieve(request.document_ids, request)
+
+    from qa import register as register_qa
+    register_qa(app, connect, retrieve, Search)

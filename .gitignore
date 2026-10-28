@@ -18,8 +18,7 @@ dist-ssr
 /backend/data/
 /backend/.venv/
 __pycache__/
-.env
-.env.*
+.env*
 !.env.example
 
 # Editor directories and files
