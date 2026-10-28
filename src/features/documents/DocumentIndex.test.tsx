@@ -1,0 +1,35 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, expect, it, vi } from 'vitest'
+import { DocumentIndex } from './DocumentIndex'
+afterEach(() => vi.unstubAllGlobals())
+const chunk = { text: 'Binary search narrows a sorted interval.', metadata: { pages: [8], token_count: 9, review_status: 'unreviewed', experimental: true, content_type: 'unknown', split_page: false, method: 'ocr' } }
+it('requires a preview, builds an experimental selection, and displays search source pages', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ state: 'not_indexed', chunks: [] }))
+    .mockResolvedValueOnce(Response.json({ included_pages: [8], skipped_pages: [], chunks: [chunk], config: { model: 'BGE', max_tokens: 440, overlap_tokens: 40 } }))
+    .mockResolvedValueOnce(Response.json({ chunk_count: 1, embedded: 1, reused: 0 }))
+    .mockResolvedValueOnce(Response.json({ state: 'ready', chunks: [chunk] }))
+    .mockResolvedValueOnce(Response.json({ results: [{ ...chunk, score: 0.8 }] }))
+  vi.stubGlobal('fetch', fetcher)
+  render(<DocumentIndex documentId="d" pageCount={59} sourceVersion="0" />)
+  fireEvent.click(screen.getByText('Index this PDF'))
+  await screen.findByText('Saved index: Not built')
+  expect(screen.getByText('Build / replace index')).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('First PDF page'), { target: { value: '8' } })
+  fireEvent.change(screen.getByLabelText('Last PDF page'), { target: { value: '8' } })
+  fireEvent.click(screen.getByLabelText('Include unreviewed pages experimentally'))
+  fireEvent.click(screen.getByText('Preview chunks'))
+  await screen.findByText('1 pages included · 0 skipped · 1 chunks')
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ start_page: 8, end_page: 8, include_unreviewed: true })
+  fireEvent.click(screen.getByText('Build / replace index'))
+  await screen.findByText('Index saved: 1 chunks; 1 new embeddings, 0 reused.')
+  fireEvent.change(screen.getByLabelText('Test similarity search'), { target: { value: 'sorted interval' } })
+  fireEvent.click(screen.getByText('Search indexed passages'))
+  expect(await screen.findByText('Open supporting page')).toHaveAttribute('href', '/api/documents/d/original#page=8')
+})
+it('shows stale indexes and blocks search', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ state: 'stale', chunks: [] })))
+  render(<DocumentIndex documentId="d" pageCount={10} sourceVersion="1" />)
+  fireEvent.click(screen.getByText('Index this PDF'))
+  await screen.findByText(/Stale — source pages changed/)
+  expect(screen.getByText('Search indexed passages')).toBeDisabled()
+})

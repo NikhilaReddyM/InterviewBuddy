@@ -6,3 +6,9 @@
 .pdf-page-grid textarea { display: block; width: 100%; min-height: 24rem; font-family: monospace; }
 .pdf-page-grid pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30rem; overflow: auto; }
 @media (max-width: 900px) { .pdf-page-grid { grid-template-columns: 1fr; } }
+
+.pdf-index { border: 1px solid var(--border); padding: 1rem; margin-block: 1rem; border-radius: .5rem; }
+.pdf-index label { display: block; margin-block: .75rem; }
+.pdf-index input[type="number"] { max-width: 7rem; }
+.pdf-index pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28rem; overflow: auto; }
+.pdf-index details, .pdf-index form { margin-block: 1rem; }

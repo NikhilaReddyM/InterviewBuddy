@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/Button'
 import './documents.css'
+import { DocumentIndex } from './DocumentIndex'
 
 type Summary = { id: string; filename: string; page_count: number; status: string; unreviewed: number; needs_attention?: number; spot_check?: number; error: string | null }
 type PageSummary = { number: number; review_status: string; needs_attention: boolean; attention_reasons: string[]; priority: string }
@@ -77,7 +78,7 @@ export function LocalDocuments() {
   }
   return <section className="card pdf-library" aria-label="Local PDF library">
     <h2>Local PDF library</h2>
-    <p>Imported PDFs and corrections live on this machine, separately from browser backups. AI search is a later step.</p>
+    <p>Imported PDFs and corrections live on this machine, separately from browser backups. Select a PDF to review pages or build a local search index.</p>
     <Button variant="secondary" disabled={busy} onClick={() => { if (mayLeave()) { setOpened(!opened); setSelected(null); setPage(null) } }}>{opened ? 'Close PDF library' : 'Open PDF library'}</Button>
     {opened && <>
       {busy && <p role="status">Loading or saving…</p>}
@@ -95,6 +96,7 @@ export function LocalDocuments() {
       </>}
       {selected && <>
         <h3>{selected.filename}</h3>
+        <DocumentIndex key={selected.id} documentId={selected.id} pageCount={selected.page_count} sourceVersion={`${number}-${page?.revision ?? 0}`} />
         <p>You do not need to review every page. Focus on flagged pages and spot-check the rest. These signals can miss errors; they do not certify accuracy.</p>
         <label>Review filter <select disabled={busy} value={filter} onChange={event => {
           if (!mayLeave()) return

@@ -227,6 +227,10 @@ def image(document_id: str, number: int):
     return FileResponse(DATA / document_id / f'{number}.png', media_type='image/png')
 
 
+from indexing import register
+register(app, connect, DATA)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['import', 'serve'])

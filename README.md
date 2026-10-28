@@ -314,3 +314,7 @@ continue during build.
 ## Local PDF library (Phase 2)
 
 Resources & Revision includes a local PDF reader with page extraction, Apple Vision OCR, and saved corrections/review status. This optional feature requires the local Python backend; the original planner and notes continue working independently. See [setup and checkpoint instructions](documentation/local-pdf-library.md). PDFs, extracted content, and SQLite data remain excluded from Git and browser backups. RAG search and AI answers are not implemented yet.
+
+## Local chunking and indexing (Phase 3)
+
+The PDF reader now includes page-range selection, chunk previews, optional experimental unreviewed inclusion, persistent local embeddings, stale-index detection, and a passage-search diagnostic. See [Phase 3 setup and behavior](documentation/chunking-indexing-phase3.md). Answers are not generated yet.
