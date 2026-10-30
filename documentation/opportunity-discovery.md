@@ -124,3 +124,61 @@ to the Matcher; original evidence remains in the immutable profile snapshot and 
 available during drafting/review. Matching decisions are checkpointed per group,
 so resuming a failed batch does not reevaluate finished groups or refetch listings.
 Provider request-size failures are distinguished from invalid structured output.
+
+## Reassess existing jobs after changing your profile
+
+Save and confirm your updated Career Profile. In **Find Opportunities → Discovery
+history**, choose **Reassess saved jobs with latest profile** on the earlier batch.
+The review date at the top of the screen is used for the new reminders.
+
+This creates a new batch using the latest confirmed version of the same resume
+and reuses the earlier batch's saved listings. It reruns matching—including jobs
+previously skipped—and prepares a new draft set for newly suitable roles within
+the batch limit. No feed refresh is performed, so check that listings are still
+open before submitting. Unconfirmed or unchanged profiles are rejected with an
+explanation rather than overwriting previous work.
+
+Reassessment has version-aware duplicate protection: the same role can be drafted
+again under the new profile version, but retrying the same reassessment does not
+duplicate drafts. Earlier workspaces, findings, reminders, and snapshots remain
+unchanged. New workspaces link to previous drafts when available. Workspace list
+labels show profile versions so the two sets can be distinguished. If the new
+preferences exclude a role, it is recorded as skipped instead of redrafted.
+
+API: `POST /api/discovery/{batch_id}/reassess` with JSON
+`{request_id, review_date}` and the existing local-request header. It starts the
+same background worker and supports the usual saved-batch recovery.
+
+## Provider throttling and input limits
+
+Agent prompts no longer repeat the original resume quotes on every call. Those
+quotes remain in the saved profile and evidence UI; agents use the confirmed fact
+statements. The Analyst processes numbered job passages in groups of up to 4,500
+characters, checkpointing each group. It does not receive a second full copy of
+the job description. Subsequent agents receive relevant analysis and bounded job
+excerpts. Output budgets vary by role, with low reasoning effort for the supported
+GPT-OSS models. No profile facts are silently removed to fit a request.
+
+A Groq HTTP 429 records its `Retry-After` delay (or token-reset duration, falling
+back to 60 seconds). The batch enters **waiting**, saves the next retry time, and
+stops all remaining job preparation. There is no immediate retry or progression
+to other applications after throttling. A local SQLite cooldown also prevents
+other discovery batches from calling that model before the recorded time.
+
+Automatic retries are disabled. There is no cooldown monitor or timer that starts
+model calls. Waiting batches remain paused across backend restarts until the user
+clicks **Resume saved batch** after the cooldown ends. Manual Resume cannot bypass
+an active provider cooldown. The browser refreshes saved status periodically, but
+those reads do not invoke Groq. No provider or account changes are made.
+
+HTTP 413/request-size errors are distinct from cooldowns: they stop the batch
+without immediate retries and require an input/configuration correction. A batch
+completion message counts ready, attention-needed, and deferred applications;
+`partial` does not imply that application drafts are ready to submit.
+
+The cooldown panel shows a live countdown and a local date/time for when manual
+resumption can be attempted. It never automatically resumes at zero. Backend time
+anchors the countdown; the backend also rejects early manual resumption. A
+recorded retry window is not a guarantee that every organization quota has reset.
+Older failures without a recorded delay cannot show an exact reset time; no
+artificial countdown is inferred from the error text.

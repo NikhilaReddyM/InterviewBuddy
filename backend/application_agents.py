@@ -114,6 +114,39 @@ PROMPTS['job_matcher'] = ('Evaluate each supplied job against confirmed candidat
 SCHEMAS = {'search_planner': SearchPlan, 'job_matcher': Matches, 'analyst': Analysis, 'writer': Package, 'reviewer': Review, 'coordinator': Decision}
 
 
+OUTPUT_TOKENS = {'search_planner': 1024, 'job_matcher': 2048, 'coordinator': 1536,
+                 'analyst': 3072, 'writer': 4096, 'reviewer': 3072}
+
+
+def compact_context(role, context):
+    result = dict(context)
+    # The confirmed fact statement is the authority for these agents; full original
+    # quotes remain in checkpoints and the UI, rather than duplicated in every prompt.
+    if 'facts' in result:
+        result['facts'] = {key: {field: value for field, value in fact.items() if field in ('category', 'text', 'question')}
+                           for key, fact in result['facts'].items()}
+    if role == 'analyst':
+        result.pop('package', None)
+        result.pop('review', None)
+        result.pop('analysis', None)
+        if 'job_passages' in result:
+            result['job'] = {key: value for key, value in result.get('job', {}).items() if key != 'description'}
+    elif role in ('coordinator', 'writer', 'reviewer'):
+        if result.get('analysis'):
+            result['analysis'] = {**result['analysis'], 'requirements': [
+                {key: value for key, value in requirement.items() if key not in ('job_quote', 'job_source_ids')}
+                for requirement in result['analysis']['requirements']]}
+        if role == 'coordinator':
+            result.pop('package', None)
+        job = dict(result.get('job', {}))
+        description = job.pop('description', '')
+        limit = 4000 if role == 'writer' else 1500
+        if description:
+            job['description_excerpt'] = description if len(description) <= limit else description[:limit] + '\n[Middle omitted; use analyzed requirements.]\n' + description[-800:]
+        result['job'] = job
+    return result
+
+
 def call_agent(role, context):
     from qa import configuration, SUPPORTED_MODELS
     from langchain_groq import ChatGroq
@@ -121,19 +154,27 @@ def call_agent(role, context):
     key, model = configuration()
     if not key or model not in SUPPORTED_MODELS:
         raise HTTPException(503, 'Configure GROQ_API_KEY and GROQ_MODEL in backend/.env, then restart.')
+    from provider_limits import GUARD, retry_seconds
+    guard = GUARD.get()
+    if guard:
+        guard.before_call(model)
     client = ChatGroq(model=model, api_key=key, base_url='https://api.groq.com', temperature=0,
-                      timeout=60, max_retries=0, max_tokens=4096 if role == 'job_matcher' else 8192).with_structured_output(SCHEMAS[role], method='json_schema', strict=True)
+                      timeout=60, max_retries=0, max_tokens=OUTPUT_TOKENS[role], reasoning_effort='low').with_structured_output(SCHEMAS[role], method='json_schema', strict=True)
     try:
         with tracing_context(enabled=False):
             result = client.invoke([('system', INSTRUCTIONS + '\n' + PROMPTS[role]),
-                                    ('human', json.dumps(context, ensure_ascii=False))], config={'callbacks': []})
+                                    ('human', json.dumps(compact_context(role, context), ensure_ascii=False))], config={'callbacks': []})
         return SCHEMAS[role].model_validate(result).model_dump()
     except Exception as error:
         from groq import APIConnectionError, APITimeoutError, AuthenticationError, RateLimitError, APIStatusError
         if isinstance(error, AuthenticationError):
             message = 'Groq rejected the API key. Check backend configuration.'
         elif isinstance(error, RateLimitError):
-            message = 'Groq rate limit reached. Wait before retrying this step.'
+            headers = error.response.headers
+            if guard:
+                guard.limited(model, headers)
+            seconds = retry_seconds(headers)
+            raise HTTPException(429, 'Groq rate limit reached. Progress is saved; retry after the cooldown.', headers={'Retry-After': str(seconds)}) from error
         elif isinstance(error, APITimeoutError):
             message = 'The model timed out. Retry to continue from the saved checkpoint.'
         elif isinstance(error, APIConnectionError):
@@ -143,7 +184,7 @@ def call_agent(role, context):
             # Classify provider failures without exposing request text or raw model output.
             detail = str(getattr(error, 'body', '')).lower()
             if status == 413 or any(term in detail for term in ('request too large', 'context_length_exceeded', 'maximum context', 'tokens per minute')):
-                message = f'{role.replace("_", " ").capitalize()} exceeded the provider request/token limit. Resume the saved batch after the limit resets; completed groups are preserved.'
+                raise HTTPException(413, f'{role.replace("_", " ").capitalize()} request is too large for this provider. No immediate retry was made; completed work is preserved.') from error
             elif status == 400:
                 message = f'{role.replace("_", " ").capitalize()} request was rejected by Groq (HTTP 400). Check the configured model’s structured-output support; saved work is preserved.'
             else:

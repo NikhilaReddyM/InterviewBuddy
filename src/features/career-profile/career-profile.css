@@ -60,3 +60,7 @@
 .agent-confirm { display: flex; align-items: center; gap: 10px; margin: 18px 0; }
 .agent-draft-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .agent-panel, .agent-results { padding: 16px; } }
+.career-cooldown { border: 1px solid var(--border); border-radius: 10px; background: var(--soft); padding: 18px; margin: 16px 0; }
+.career-cooldown h4 { margin: 0 0 10px; }
+.career-cooldown [role='timer'] { font-variant-numeric: tabular-nums; font-size: 1.4rem; color: var(--accent); }
+.career-cooldown p:last-child { margin-bottom: 0; }

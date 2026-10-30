@@ -3,7 +3,7 @@ import { AgentFlowPanel } from './AgentFlowPanel'
 import { Button } from '../../components/Button'
 import '../career-profile/career-profile.css'
 
-type Workspace = { id: string; company: string; role: string; description: string; url: string; profile_revision?: number }
+type Workspace = { previous_workspace_id?: string | null; id: string; company: string; role: string; description: string; url: string; profile_revision?: number }
 type Draft = { id: string; kind: string; content: string; profile_snapshot_id: string }
 type Reminder = { id: string; due_date: string; note: string; done: number }
 type Run = { id: string; checkpoint_id: string; paused: boolean; state: { phase?: string; instructions?: string } }
@@ -70,7 +70,7 @@ export function ApplicationWorkspaces({ initialWorkspaceId }: { initialWorkspace
   }
   return <div className="career-page">
     <section className="card career-panel"><h2>Your application workspaces</h2><p className="subtle">Jobs, draft versions, review notes, and reminders are saved in the local backend. Each workspace keeps the confirmed profile version it started with. These records are separate from the manual job tracker and browser backups.</p>
-      <div className="actions">{items.map(item => <Button key={item.id} variant="secondary" disabled={busy} onClick={() => open(item.id)}>{item.company} · {item.role}</Button>)}</div>{!items.length && <p>No workspaces yet. Add a job below to get started.</p>}
+      <div className="actions">{items.map(item => <Button key={item.id} variant="secondary" disabled={busy} onClick={() => open(item.id)}>{item.company} · {item.role}{item.profile_revision ? ` · Profile v${item.profile_revision}` : ''}</Button>)}</div>{!items.length && <p>No workspaces yet. Add a job below to get started.</p>}
       {error && <div className="career-error" role="alert"><p>{error}</p><Button variant="secondary" disabled={busy} onClick={() => { setError(''); setReload(value => value + 1) }}>Reload workspace list</Button></div>}
       {notice && <p className="career-notice" role="status">{notice}</p>}
     </section>
@@ -80,6 +80,7 @@ export function ApplicationWorkspaces({ initialWorkspaceId }: { initialWorkspace
     }) }}><fieldset disabled={busy} className="workspace-fields"><div className="field"><label htmlFor="workspace-resume">Confirmed resume profile</label><select id="workspace-resume" required value={job.resume_id} onChange={event => setJob({ ...job, resume_id: event.target.value, request_id: id() })}><option value="">Choose a resume</option>{resumes.map(resume => <option key={resume.id} value={resume.id}>{resume.filename}</option>)}</select><p className="field-hint">Confirm the profile in Career Profile before using it here.</p></div>
       {(['company', 'role', 'url', 'description'] as const).map(key => <div className="field" key={key}><label htmlFor={`job-${key}`}>{key === 'url' ? 'Application URL (optional)' : key === 'description' ? 'Job description' : key === 'company' ? 'Company' : 'Role'}</label>{key === 'description' ? <textarea id={`job-${key}`} rows={5} required value={job[key]} onChange={event => setJob({ ...job, [key]: event.target.value, request_id: id() })} /> : <input id={`job-${key}`} type={key === 'url' ? 'url' : 'text'} required={key !== 'url'} value={job[key]} onChange={event => setJob({ ...job, [key]: event.target.value, request_id: id() })} />}</div>)}<Button type="submit">Create workspace</Button></fieldset></form></details>
     {detail && <section className="card career-editor"><div className="career-section-heading"><div><h2>{detail.company} · {detail.role}</h2><p className="subtle">Profile version {detail.profile_snapshot.profile_revision} · preserved for every draft in this workspace</p></div></div>
+      {detail.previous_workspace_id && <p className="subtle">Reassessed using an updated profile. <Button variant="secondary" onClick={() => open(detail.previous_workspace_id!)}>View previous drafts</Button></p>}
       {detail.url && <a href={detail.url} target="_blank" rel="noreferrer">Open application page</a>}<details className="career-details"><summary>Job description</summary><pre>{detail.description}</pre></details>
       <AgentFlowPanel key={detail.id} workspaceId={detail.id} runs={detail.runs} onSaved={() => refresh(detail.id)} />
       <h3>Saved drafts</h3>{!detail.drafts.length && <p className="subtle">No drafts yet. Prepare an application with the agents above, or save your own draft below.</p>}{detail.drafts.map(item => <details className="career-details" key={item.id}><summary>{item.kind.replaceAll('_', ' ')} · version {detail.drafts.filter(d => d.kind === item.kind).indexOf(item) + 1}</summary><pre>{item.content}</pre>{detail.findings.filter(f => f.draft_id === item.id).map(f => <p key={f.id}><strong>{f.severity}:</strong> {f.message}</p>)}</details>)}

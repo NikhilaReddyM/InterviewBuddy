@@ -162,3 +162,27 @@ class AgentFlowTests(unittest.TestCase):
                 resumed = drive(graph, run_row(self.store, self.workspace['id'], result['id']), None)
         self.assertEqual(resumed['state']['phase'], 'ready_for_review')
         self.assertEqual(len(self.store.detail(self.workspace['id'])['drafts']), 3)
+
+    def test_long_job_analysis_resumes_at_unfinished_passages(self):
+        with self.store.connect() as db:
+            db.execute('UPDATE workspaces SET description=? WHERE id=?', ('Build Python APIs\n' + '\n'.join('Python requirement ' + ('x' * 780) for _ in range(10)), self.workspace['id']))
+        groups = []
+        def model(role, context):
+            if role == 'analyst':
+                groups.append([part['id'] for part in context['job_passages']])
+                if len(groups) == 2:
+                    raise HTTPException(429, 'Rate limit', headers={'Retry-After': '60'})
+                return {**ANALYSIS, 'requirements': [{**ANALYSIS['requirements'][0], 'job_source_ids': [groups[-1][0]]}]}
+            if role == 'coordinator':
+                return decision('finish' if context.get('review') else 'write')
+            return PACKAGE if role == 'writer' else REVIEW
+        with patch('application_agents.call_agent', side_effect=model):
+            result = start_agents(self.store, self.workspace['id'], self.start)
+        self.assertEqual(result['error_status'], 429)
+        self.assertEqual(result['retry_after'], '60')
+        cursor = result['state']['analysis_cursor']
+        self.assertGreater(cursor, 0)
+        with locked_graph(Store(self.root), result['id']) as graph, patch('application_agents.call_agent', side_effect=model):
+            recovered = drive(graph, run_row(self.store, self.workspace['id'], result['id']), None)
+        self.assertEqual(recovered['state']['phase'], 'ready_for_review')
+        self.assertGreater(groups[2][0], max(groups[0]))

@@ -114,10 +114,13 @@ class DiscoveryTests(unittest.TestCase):
         with patch('discovery.cached_feed', return_value=[JOB]), patch('application_agents.call_agent', side_effect=model):
             process_batch(self.store, self.batch_id)
         result = batch_detail(self.store, self.batch_id)
-        self.assertEqual(result['status'], 'partial')
+        self.assertEqual(result['status'], 'waiting')
         workspace = self.store.detail(result['progress']['items'][0]['workspace_id'])
         self.assertEqual(len(workspace['drafts']), 3)
         self.assertIn('incomplete', workspace['reminders'][0]['note'])
+        from discovery import save_progress
+        result['progress']['retry_at'] = 0
+        save_progress(self.store, self.batch_id, result['progress'], 'waiting')
         self.run_batch()
         self.assertEqual(batch_detail(self.store, self.batch_id)['progress']['items'][0]['status'], 'ready_for_review')
         self.assertEqual(batch_detail(self.store, self.batch_id)['status'], 'completed')
@@ -246,3 +249,143 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertTrue(response.json()['is_running'])
             process.assert_not_called()
+
+    def confirm_updated_profile(self):
+        with closing(sqlite3.connect(self.root / 'resumes/resumes.sqlite3')) as db:
+            db.execute('UPDATE career_profiles SET revision=2, payload=?', (json.dumps({'facts': [{'category': 'skills', 'text': 'Updated Python APIs', 'evidence': 'Updated Python APIs'}], 'preferences': {'remote': 'remote'}}),))
+            db.commit()
+
+    def test_reassessment_creates_new_profile_drafts_and_preserves_history(self):
+        from discovery import reassess_batch, ReassessInput
+        self.run_batch()
+        previous = self.store.detail(self.store.list()[0]['id'])
+        self.confirm_updated_profile()
+        request = ReassessInput(request_id='reassess-1', review_date='2026-11-02')
+        reassessed_id = reassess_batch(self.store, self.batch_id, request)
+        self.assertEqual(reassess_batch(self.store, self.batch_id, request), reassessed_id)
+        with patch('discovery.cached_feed', side_effect=AssertionError('Reuse saved jobs')), patch('application_agents.call_agent', side_effect=self.model):
+            process_batch(self.store, reassessed_id)
+        result = batch_detail(self.store, reassessed_id)
+        self.assertEqual(result['status'], 'completed')
+        current = self.store.detail(result['progress']['items'][0]['workspace_id'])
+        self.assertEqual(current['profile_snapshot']['profile_revision'], 2)
+        self.assertEqual(current['previous_workspace_id'], previous['id'])
+        self.assertEqual(len(current['drafts']), 3)
+        self.assertTrue(all(draft['profile_snapshot_id'] == current['profile_snapshot_id'] for draft in current['drafts']))
+        self.assertEqual(self.store.detail(previous['id'])['drafts'], previous['drafts'])
+        self.assertEqual(current['reminders'][0]['due_date'], '2026-11-02')
+        self.assertEqual(len(self.store.list()), 2)
+
+    def test_reassessment_requires_new_confirmed_profile(self):
+        from discovery import reassess_batch, ReassessInput
+        self.run_batch()
+        request = ReassessInput(request_id='reassess-1', review_date='2026-11-02')
+        with self.assertRaises(HTTPException) as caught:
+            reassess_batch(self.store, self.batch_id, request)
+        self.assertIn('latest confirmed profile', caught.exception.detail)
+        self.confirm_updated_profile()
+        with closing(sqlite3.connect(self.root / 'resumes/resumes.sqlite3')) as db:
+            db.execute('UPDATE career_profiles SET confirmed_at=NULL')
+            db.commit()
+        with self.assertRaises(HTTPException):
+            reassess_batch(self.store, self.batch_id, request)
+
+    def test_http_reassessment_uses_saved_listings_with_updated_profile(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from workspaces import register
+        self.run_batch()
+        self.confirm_updated_profile()
+        app = FastAPI()
+        register(app, lambda: self.root)
+        with TestClient(app) as client, patch('discovery.cached_feed', side_effect=AssertionError('Must not search again')), patch('application_agents.call_agent', side_effect=self.model):
+            response = client.post(f'/api/discovery/{self.batch_id}/reassess', json={'request_id': 'http-reassessment', 'review_date': '2026-11-02'})
+            self.assertEqual(response.status_code, 200)
+            batch = client.get('/api/discovery/' + response.json()['id']).json()
+            self.assertEqual(batch['status'], 'completed')
+            self.assertEqual(len(self.store.list()), 2)
+
+    def test_batch_reports_snapshot_preferences_even_after_profile_changes(self):
+        original = batch_detail(self.store, self.batch_id)
+        self.assertEqual(original['profile_preferences']['remote'], 'remote')
+        with closing(sqlite3.connect(self.root / 'resumes/resumes.sqlite3')) as db:
+            db.execute('UPDATE career_profiles SET revision=2,payload=?', (json.dumps({'facts': [{'text': 'Python'}], 'preferences': {'remote': 'hybrid', 'locations': 'US'}}),))
+            db.commit()
+        from discovery import reassess_batch, ReassessInput
+        self.run_batch()
+        reassessed = reassess_batch(self.store, self.batch_id, ReassessInput(request_id='pref-reassess', review_date='2026-11-02'))
+        result = batch_detail(self.store, reassessed)
+        self.assertEqual(result['profile_preferences'], {'remote': 'hybrid', 'locations': 'US'})
+        self.assertEqual(result['profile_revision'], 2)
+        self.assertEqual(batch_detail(self.store, self.batch_id)['profile_preferences']['remote'], 'remote')
+
+    def test_rate_limit_stops_other_jobs_and_resumes_when_due(self):
+        from discovery import save_progress
+        jobs = [{**JOB, 'company': f'Cooldown Company {i}'} for i in range(3)]
+        batch_id = create_batch(self.store, self.input.model_copy(update={'request_id': 'cooldown-batch', 'max_applications': 3}))
+        def throttled(role, context):
+            if role == 'analyst':
+                raise HTTPException(429, 'Provider cooldown', headers={'Retry-After': '90'})
+            return self.model(role, context)
+        with patch('discovery.cached_feed', return_value=jobs), patch('application_agents.call_agent', side_effect=throttled):
+            process_batch(self.store, batch_id)
+        result = batch_detail(self.store, batch_id)
+        self.assertEqual(result['status'], 'waiting')
+        self.assertEqual(len(self.store.list()), 1)  # Do not advance to the other jobs.
+        self.assertIn('Automatic retries are off', result['progress']['events'][-1])
+        with patch('application_agents.call_agent') as call:
+            process_batch(Store(self.root), batch_id)
+            call.assert_not_called()
+        result['progress']['retry_at'] = 0
+        save_progress(self.store, batch_id, result['progress'], 'waiting')
+        with patch('application_agents.call_agent', side_effect=self.model):
+            process_batch(Store(self.root), batch_id)
+        self.assertEqual(batch_detail(self.store, batch_id)['status'], 'completed')
+        self.assertEqual(len(self.store.list()), 3)
+
+    def test_cooldown_always_requires_manual_resumption(self):
+        from discovery import save_progress
+        progress = batch_detail(self.store, self.batch_id)['progress']
+        progress['cooldown_retries'] = 5
+        save_progress(self.store, self.batch_id, progress, 'waiting')
+        with patch('application_agents.call_agent', side_effect=HTTPException(429, 'Quota exhausted', headers={'Retry-After': '3600'})):
+            process_batch(self.store, self.batch_id)
+        result = batch_detail(self.store, self.batch_id)
+        self.assertEqual(result['status'], 'waiting')
+        self.assertIn('Automatic retries are off', result['progress']['events'][-1])
+
+    def test_manual_pause_keeps_next_resume_time(self):
+        from discovery import save_progress
+        progress = batch_detail(self.store, self.batch_id)['progress']
+        progress['cooldown_retries'] = 5
+        save_progress(self.store, self.batch_id, progress, 'waiting')
+        with patch('application_agents.call_agent', side_effect=HTTPException(429, 'Quota exhausted', headers={'Retry-After': '120'})):
+            process_batch(self.store, self.batch_id)
+        result = batch_detail(self.store, self.batch_id)
+        self.assertEqual(result['status'], 'waiting')
+        self.assertGreater(result['cooldown_until'], result['server_time'] + 110)
+
+    def test_api_resume_does_not_bypass_failed_batch_cooldown(self):
+        from discovery import save_progress
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from workspaces import register
+        import time
+        progress = batch_detail(self.store, self.batch_id)['progress']
+        progress['retry_at'] = time.time() + 120
+        save_progress(self.store, self.batch_id, progress, 'failed')
+        app = FastAPI()
+        register(app, lambda: self.root)
+        with TestClient(app) as client, patch('discovery.process_batch') as process:
+            response = client.post(f'/api/discovery/{self.batch_id}/retry', json={})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['status'], 'failed')
+            process.assert_not_called()
+
+    def test_registration_does_not_install_an_automatic_retry_worker(self):
+        from fastapi import FastAPI
+        from workspaces import register
+        app = FastAPI()
+        original_lifespan = app.router.lifespan_context
+        register(app, lambda: self.root)
+        self.assertIs(app.router.lifespan_context, original_lifespan)

@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Search, Bell, ExternalLink } from 'lucide-react'
+import { CooldownStatus } from './CooldownStatus'
 import { Button } from '../../components/Button'
 import { useToday } from '../../utils/useToday'
 import '../career-profile/career-profile.css'
 
 type Job = { candidate_id: string; company: string; role: string; source: string; location: string; url: string }
 type Match = { candidate_id: string; eligible: boolean; score: number; reason: string; cautions: string[] }
-type Batch = { id: string; status: string; is_running?: boolean; created_at: string; progress: { error?: string; source_errors?: string[]; events: string[]; candidates?: Job[]; matches?: Match[]; items: { candidate_id: string; workspace_id?: string; status: string; error?: string; outcome_reason?: string; match: Match }[] } }
+type Batch = { id: string; status: string; is_running?: boolean; cooldown_until?: number | null; server_time?: number; profile_revision?: number; profile_preferences?: { target_roles?: string; locations?: string; remote?: string; exclusions?: string }; created_at: string; progress: { error?: string; retry_at?: number; source_errors?: string[]; events: string[]; candidates?: Job[]; reassesses_batch_id?: string; match_results?: Match[]; matches?: Match[]; items: { candidate_id: string; workspace_id?: string; status: string; error?: string; outcome_reason?: string; match: Match }[] } }
 type Reminder = { id: string; workspace_id: string; due_date: string; company: string; role: string; note: string }
 type Resume = { id: string; filename: string }
 async function get<T>(path: string, body?: unknown): Promise<T> {
@@ -20,6 +21,10 @@ async function get<T>(path: string, body?: unknown): Promise<T> {
 
 export function Opportunities({ onOpenWorkspace }: { onOpenWorkspace: (workspaceId: string) => void }) {
   const today = useToday()
+  const [clockOffset, setClockOffset] = useState(0)
+  const [now, setNow] = useState(() => Date.now() / 1000)
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now() / 1000), 1000); return () => window.clearInterval(timer) }, [])
+  const reassessKeys = useRef<Record<string, string>>({})
   const [batches, setBatches] = useState<Batch[]>([])
   const [resumes, setResumes] = useState<Resume[]>([])
   const [queue, setQueue] = useState<Reminder[]>([])
@@ -36,7 +41,7 @@ export function Opportunities({ onOpenWorkspace }: { onOpenWorkspace: (workspace
       fetching = true
       try {
         const [saved, files, reminders] = await Promise.all([get<Batch[]>('/api/discovery'), get<Resume[]>('/api/resumes'), get<Reminder[]>('/api/discovery/review-queue')])
-        if (active) { setBatches(saved); setResumes(files); setQueue(reminders); setError('') }
+        if (active) { if (saved[0]?.server_time) setClockOffset(saved[0].server_time - Date.now() / 1000); setBatches(saved); setResumes(files); setQueue(reminders); setError('') }
       } catch (failure) { if (active) setError(failure instanceof Error ? failure.message : 'Could not load saved opportunities.') }
       finally { fetching = false }
     }
@@ -65,12 +70,32 @@ export function Opportunities({ onOpenWorkspace }: { onOpenWorkspace: (workspace
     </section>
     <section className="card career-panel"><div className="career-section-heading"><h2><Bell size={20} aria-hidden="true" /> Your review reminders</h2><span className="career-badge">{queue.length} pending</span></div>{queue.length ? queue.map(item => <div className="workspace-reminder" key={item.id}><div><strong>{item.company} · {item.role}</strong><p>{item.due_date}{item.due_date < today ? ' · Overdue' : item.due_date === today ? ' · Today' : ''} · {item.note}</p></div><Button variant="secondary" onClick={() => { if (item.workspace_id) onOpenWorkspace(item.workspace_id) }}>Review drafts</Button></div>) : <p>Your prepared applications and review reminders will appear here.</p>}</section>
     <section className="card career-panel"><h2>Discovery history</h2>{!batches.length && <p>No discovery runs yet.</p>}{batches.map(batch => <div className="agent-results" key={batch.id}><div className="career-section-heading"><h3>{new Date(batch.created_at).toLocaleString()}</h3><span className="career-badge">{batch.status}</span></div>
-      {!['queued', 'running'].includes(batch.status) && batch.progress.error && <p className="field-error">{batch.progress.error}</p>}{batch.progress.source_errors?.map((message, i) => <p key={i}>{message}</p>)}
+      {batch.profile_preferences && <section className="agent-requirement" aria-label="Preferences used for this batch"><h4>Preferences used · Profile version {batch.profile_revision}</h4><dl>
+        <dt>Target roles</dt><dd>{batch.profile_preferences.target_roles || 'Not specified'}</dd>
+        <dt>Locations</dt><dd>{batch.profile_preferences.locations || 'Not specified'}</dd>
+        <dt>Work arrangement</dt><dd>{batch.profile_preferences.remote === 'unspecified' ? 'Not specified' : batch.profile_preferences.remote || 'Not specified'}</dd>
+        <dt>Exclusions</dt><dd>{batch.profile_preferences.exclusions || 'None specified'}</dd>
+      </dl>{batch.progress.reassesses_batch_id && <p className="subtle">This reassessment applies these preferences to the earlier saved listings. It does not search for new jobs. Previously shortlisted roles can now be rejected.</p>}</section>}
+      {!['queued', 'running', 'waiting'].includes(batch.status) && batch.progress.error && <p className="field-error">{batch.progress.error}</p>}{batch.progress.source_errors?.map((message, i) => <p key={i}>{message}</p>)}
       {['queued', 'running'].includes(batch.status) && <p role="status">Agents are working independently. If the backend was restarted, resume this saved run.</p>}
+      {batch.status === 'partial' && <p>Some applications are incomplete. Review any saved drafts and warnings; deferred applications are not ready to submit.</p>}
+      {['waiting', 'failed', 'partial'].includes(batch.status) && (batch.cooldown_until ?? batch.progress.retry_at) ? <CooldownStatus key={`${batch.id}:${batch.cooldown_until ?? batch.progress.retry_at}:${batch.server_time ?? ''}`} until={(batch.cooldown_until ?? batch.progress.retry_at)!} serverTime={batch.server_time} /> : batch.status === 'waiting' ? <p role="status">This batch is paused. Automatic retries are off. No exact cooldown time was recorded; resume when you are ready.</p> : null}
       {batch.progress.items.map(item => { const job = batch.progress.candidates?.find(candidate => candidate.candidate_id === item.candidate_id); return <div className="agent-requirement" key={item.candidate_id}><strong>{job?.company} · {job?.role}</strong><p>{item.status.replaceAll('_', ' ')} · Match score {item.match.score}/100</p><p>{item.match.reason}</p>{item.outcome_reason && <p>{item.outcome_reason}</p>}{item.match.cautions.map((caution, i) => <p key={i}>Check before submitting: {caution}</p>)}{item.error && <p className="field-error">{item.error}</p>}{job && <p>Source: <a href={job.url} target="_blank" rel="noreferrer">{job.source} <ExternalLink size={13} aria-hidden="true" /></a> · {job.location}</p>}{item.workspace_id && <Button variant="secondary" onClick={() => { if (item.workspace_id) onOpenWorkspace(item.workspace_id) }}>Open application workspace</Button>}</div> })}
       {!batch.progress.items.length && batch.status === 'completed' && <p>No new suitable roles were found in this batch. Review your preferences or try again when the feeds refresh.</p>}
-      <details className="career-details"><summary>Matching decisions and activity</summary>{batch.progress.matches?.filter(match => !match.eligible || match.score < 65).map(match => <p key={match.candidate_id}>Skipped {batch.progress.candidates?.find(candidate => candidate.candidate_id === match.candidate_id)?.role}: {match.reason}</p>)}<ol>{batch.progress.events.map((message, i) => <li key={i}>{message}</li>)}</ol></details>
-      {(['queued', 'running', 'failed'].includes(batch.status) || batch.progress.items.some(item => item.status === 'deferred')) && <Button variant="secondary" disabled={busy || batch.is_running} onClick={async () => { setBusy(true); try { const updated = await get<Batch>(`/api/discovery/${batch.id}/retry`, {}); setBatches(items => items.map(item => item.id === batch.id ? updated : item)); setReload(value => value + 1) } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not resume saved batch.') } finally { setBusy(false) } }}>{batch.is_running ? 'Batch is running…' : 'Resume saved batch'}</Button>}
+      <details className="career-details"><summary>Matching decisions and activity</summary>{(batch.progress.matches ?? batch.progress.match_results ?? []).filter(match => !match.eligible || match.score < 65).map(match => <p key={match.candidate_id}>Skipped {batch.progress.candidates?.find(candidate => candidate.candidate_id === match.candidate_id)?.role}: {match.reason}</p>)}<ol>{batch.progress.events.map((message, i) => <li key={i}>{message}</li>)}</ol></details>
+      {!!batch.progress.candidates?.length && <Button variant="secondary" disabled={busy || batch.is_running} onClick={async () => {
+        setBusy(true); setError('')
+        const key = reassessKeys.current[batch.id] ?? crypto.randomUUID()
+        reassessKeys.current[batch.id] = key
+        try {
+          const created = await get<Batch>(`/api/discovery/${batch.id}/reassess`, { request_id: key, review_date: form.review_date })
+          setBatches(items => [created, ...items.filter(item => item.id !== created.id)])
+          delete reassessKeys.current[batch.id]
+          setNotice('Reassessment started with your latest confirmed profile. Previous drafts are preserved. New results and reminders will appear here.')
+        } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not reassess saved jobs.') }
+        finally { setBusy(false) }
+      }}>Reassess saved jobs with latest profile</Button>}
+      {(['queued', 'running', 'waiting', 'failed'].includes(batch.status) || batch.progress.items.some(item => item.status === 'deferred')) && <Button variant="secondary" disabled={busy || batch.is_running || (batch.cooldown_until ?? batch.progress.retry_at ?? 0) > now + clockOffset} onClick={async () => { setBusy(true); try { const updated = await get<Batch>(`/api/discovery/${batch.id}/retry`, {}); setBatches(items => items.map(item => item.id === batch.id ? updated : item)); setReload(value => value + 1) } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not resume saved batch.') } finally { setBusy(false) } }}>{batch.is_running ? 'Batch is running…' : (batch.cooldown_until ?? batch.progress.retry_at ?? 0) > now + clockOffset ? 'Cooldown active…' : 'Resume saved batch'}</Button>}
     </div>)}</section>
   </div>
 }

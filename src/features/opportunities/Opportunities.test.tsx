@@ -44,3 +44,33 @@ it('hides old errors and disables resume while the worker is running', async () 
   expect(await screen.findByRole('button', { name: 'Batch is running…' })).toBeDisabled()
   expect(screen.queryByText('Old rate limit error')).not.toBeInTheDocument()
 })
+it('starts a reassessment of saved listings using the latest confirmed profile', async () => {
+  const batch = { id: 'old-batch', status: 'completed', created_at: '2026-10-30T12:00:00Z', progress: { events: [], items: [], candidates: [{ candidate_id: 'j1', company: 'Example', role: 'Engineer', source: 'remotive', location: 'Worldwide', url: 'https://remotive.com/jobs/1' }] } }
+  const updated = { ...batch, id: 'new-batch', status: 'queued', progress: { ...batch.progress, events: ['Reassessment queued'] } }
+  const fetcher = vi.fn().mockResolvedValueOnce(response([batch])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response(updated))
+  vi.stubGlobal('fetch', fetcher)
+  render(<Opportunities onOpenWorkspace={vi.fn()} />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Reassess saved jobs with latest profile' }))
+  await screen.findByText(/Reassessment started with your latest confirmed profile/)
+  expect(fetcher.mock.calls[3][0]).toBe('/api/discovery/old-batch/reassess')
+  expect(JSON.parse(fetcher.mock.calls[3][1].body).review_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+})
+it('shows preferences and partial rejection decisions before matching finishes', async () => {
+  const batch = { id: 'b1', status: 'failed', created_at: '2026-10-30T12:00:00Z', profile_revision: 6, profile_preferences: { target_roles: 'Staff Engineer', locations: 'US', remote: 'hybrid', exclusions: 'None' }, progress: { events: ['Matched 2 of 12 shortlisted roles.'], items: [], reassesses_batch_id: 'old', candidates: [{ candidate_id: 'j1', company: 'Example', role: 'Engineer', source: 'arbeitnow', location: 'Netherlands', url: 'https://example.com/job' }], match_results: [{ candidate_id: 'j1', eligible: false, score: 20, reason: 'Netherlands location conflicts with US preference.', cautions: [] }] } }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response([batch])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([])))
+  render(<Opportunities onOpenWorkspace={vi.fn()} />)
+  expect(await screen.findByRole('region', { name: 'Preferences used for this batch' })).toHaveTextContent('US')
+  expect(screen.getByText('hybrid')).toBeInTheDocument()
+  await userEvent.click(screen.getByText('Matching decisions and activity'))
+  expect(screen.getByText(/Netherlands location conflicts with US preference/)).toBeVisible()
+  expect(screen.getByText(/does not search for new jobs/)).toBeInTheDocument()
+})
+it('shows a manual cooldown without making automatic retries', async () => {
+  const batch = { id: 'cooldown', status: 'waiting', created_at: '2026-10-30T12:00:00Z', progress: { retry_at: Date.now() / 1000 + 120, error: 'Old rate limit', events: ['Paused for cooldown'], items: [] } }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response([batch])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([])))
+  render(<Opportunities onOpenWorkspace={vi.fn()} />)
+  expect(await screen.findByRole('button', { name: 'Cooldown active…' })).toBeDisabled()
+  expect(screen.getByText(/Automatic retries are off/)).toBeInTheDocument()
+  expect(screen.queryByText('Old rate limit')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Find opportunities' })).toBeEnabled()
+})

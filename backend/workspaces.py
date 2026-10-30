@@ -64,6 +64,9 @@ class Store:
                 id TEXT PRIMARY KEY, profile_snapshot_id TEXT NOT NULL REFERENCES profile_snapshots(id),
                 company TEXT NOT NULL, role TEXT NOT NULL, description TEXT NOT NULL, url TEXT NOT NULL,
                 tracker_id TEXT, request_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workspace_reassessments (
+                workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+                previous_workspace_id TEXT NOT NULL REFERENCES workspaces(id));
             CREATE TABLE IF NOT EXISTS drafts (
                 id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
                 profile_snapshot_id TEXT NOT NULL REFERENCES profile_snapshots(id),
@@ -156,6 +159,14 @@ class Store:
                        (workspace_id, snapshot_id, data.company, data.role, data.description, data.url, data.tracker_id, data.request_id, now()))
             return dict(self.require(db, workspace_id))
 
+    def link_reassessment(self, previous_id, workspace_id):
+        with self.connect() as db:
+            previous = self.require(db, previous_id)
+            current = self.require(db, workspace_id)
+            if previous_id == workspace_id or any(previous[key] != current[key] for key in ('company', 'role', 'description', 'url')):
+                raise HTTPException(409, 'Reassessment must refer to the same saved job.')
+            db.execute('INSERT OR IGNORE INTO workspace_reassessments VALUES (?,?)', (workspace_id, previous_id))
+
     def list(self):
         with self.connect() as db:
             return [dict(row) for row in db.execute('SELECT w.*, p.profile_revision FROM workspaces w JOIN profile_snapshots p ON w.profile_snapshot_id=p.id ORDER BY w.created_at DESC')]
@@ -169,7 +180,8 @@ class Store:
             findings = [dict(row) for row in db.execute('SELECT f.* FROM findings f JOIN drafts d ON f.draft_id=d.id WHERE d.workspace_id=? ORDER BY f.created_at', (workspace_id,))]
             reminders = [dict(row) for row in db.execute('SELECT * FROM reminders WHERE workspace_id=? ORDER BY due_date', (workspace_id,))]
             runs = [dict(row) for row in db.execute('SELECT * FROM runs WHERE workspace_id=? ORDER BY created_at', (workspace_id,))]
-            return {**workspace, 'profile_snapshot': snapshot, 'drafts': drafts, 'findings': findings, 'reminders': reminders, 'runs': runs}
+            parent = db.execute('SELECT previous_workspace_id FROM workspace_reassessments WHERE workspace_id=?', (workspace_id,)).fetchone()
+            return {**workspace, 'previous_workspace_id': parent['previous_workspace_id'] if parent else None, 'profile_snapshot': snapshot, 'drafts': drafts, 'findings': findings, 'reminders': reminders, 'runs': runs}
 
     def add_draft(self, workspace_id, data: DraftInput):
         with self.connect() as db:

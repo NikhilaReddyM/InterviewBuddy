@@ -21,6 +21,8 @@ class AgentState(TypedDict, total=False):
     phase: str
     context: dict
     analysis: dict
+    analysis_parts: list[dict]
+    analysis_cursor: int
     package: dict
     review: dict
     decision: dict
@@ -73,11 +75,22 @@ def build_agent_graph(saver, store, run_id):
         from profiles import source_passages
         job_text = current['job']['description']
         passages = source_passages(job_text)
-        analyst_context = {**current, 'job_passages': [{'id': i + 1, 'text': job_text[start:end]} for i, (start, end) in enumerate(passages)]}
+        cursor = state.get('analysis_cursor', 0)
+        group = []
+        size = 0
+        for i in range(cursor, len(passages)):
+            start, end = passages[i]
+            if group and size + end - start > 4500:
+                break
+            group.append({'id': i + 1, 'text': job_text[start:end]})
+            size += end - start
+        analyst_context = {**current, 'job_passages': group,
+                           'scope': 'Analyze only these passages; other job passages are analyzed separately.'}
+
         analysis = agents.Analysis.model_validate(agents.call_agent('analyst', analyst_context)).model_dump()
         for requirement in analysis['requirements']:
             ids = requirement['job_source_ids']
-            if any(i < 1 or i > len(passages) for i in ids):
+            if any(i not in {part['id'] for part in group} for i in ids):
                 raise HTTPException(502, 'The analyst returned invalid job references. Retry this step.')
             start = min(passages[i - 1][0] for i in ids)
             end = max(passages[i - 1][1] for i in ids)
@@ -87,7 +100,17 @@ def build_agent_graph(saver, store, run_id):
             check_ids(requirement['relevant_fact_ids'], current['facts'])
         if any(not question.strip() or question not in current['job']['description'] for question in analysis['screening_questions']):
             raise HTTPException(502, 'The analyst returned a screening question absent from the job description. Retry this step.')
-        return {'analysis': analysis, 'phase': 'analyzed', 'events': event(state, 'Analyst identified requirements, evidence, and missing facts.')}
+        parts = [*state.get('analysis_parts', []), analysis]
+        cursor += len(group)
+        if cursor < len(passages):
+            return {'analysis_parts': parts, 'analysis_cursor': cursor, 'phase': 'analyzing',
+                    'events': event(state, f'Analyst checked {cursor} of {len(passages)} job passages.')}
+        merged = {'requirements': [item for part in parts for item in part['requirements']],
+                  'summary': '\n'.join(part['summary'] for part in parts)}
+        for field in ('missing_facts', 'concerns', 'screening_questions'):
+            merged[field] = list(dict.fromkeys(item for part in parts for item in part[field]))
+        return {'analysis': merged, 'analysis_parts': parts, 'analysis_cursor': cursor,
+                'phase': 'analyzed', 'events': event(state, 'Analyst identified requirements, evidence, and missing facts.')}
 
     def coordinator(state):
         reviewed = bool(state.get('review'))
@@ -132,7 +155,7 @@ def build_agent_graph(saver, store, run_id):
 
     def after_clarification(state):
         # Reassess with new evidence. Existing draft gets rewritten if one already exists.
-        return {'review': {}, 'phase': 'reassessing'}
+        return {'review': {}, 'analysis_parts': [], 'analysis_cursor': 0, 'phase': 'reassessing'}
 
     def writer(state):
         current = context(state)
@@ -195,7 +218,7 @@ def build_agent_graph(saver, store, run_id):
                        ('reviewer', reviewer), ('persist_review', persist_review), ('finish', finish)]:
         graph.add_node(name, node)
     graph.add_edge(START, 'analyst')
-    graph.add_edge('analyst', 'coordinator')
+    graph.add_conditional_edges('analyst', lambda state: 'analyst' if state.get('phase') == 'analyzing' else 'coordinator', ['analyst', 'coordinator'])
     graph.add_conditional_edges('coordinator', route, ['clarification', 'writer', 'finish'])
     graph.add_edge('clarification', 'after_clarification')
     graph.add_edge('after_clarification', 'analyst')
@@ -209,11 +232,13 @@ def build_agent_graph(saver, store, run_id):
 
 def drive(graph, run, input):
     try:
-        graph.invoke(input, {'configurable': {'thread_id': run['id']}, 'callbacks': [], 'recursion_limit': 70})
+        graph.invoke(input, {'configurable': {'thread_id': run['id']}, 'callbacks': [], 'recursion_limit': 120})
         return describe(graph, run)
     except Exception as error:
         current = describe(graph, run)
-        return {**current, 'error': error.detail if isinstance(error, HTTPException) else 'This step failed. Retry to continue from the saved checkpoint.'}
+        return {**current, 'error': error.detail if isinstance(error, HTTPException) else 'This step failed. Retry to continue from the saved checkpoint.',
+                'error_status': error.status_code if isinstance(error, HTTPException) else 500,
+                'retry_after': (error.headers or {}).get('Retry-After') if isinstance(error, HTTPException) else None}
 
 
 def start_agents(store, workspace_id, data: AgentStart):
