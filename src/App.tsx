@@ -12,6 +12,8 @@ import { downloadText } from './storage/files'
 import { Dashboard } from './features/dashboard/Dashboard'
 import { SystemDesignLab } from './features/design-lab/SystemDesignLab'
 import { ResourceLibrary } from './features/resources/ResourceLibrary'
+import { ApplicationWorkspaces } from './features/workspaces/ApplicationWorkspaces'
+import { CareerProfile } from './features/career-profile/CareerProfile'
 import { WeeklyPlanner } from './features/planner/WeeklyPlanner'
 
 const sections = [
@@ -20,6 +22,8 @@ const sections = [
   { id: 'resources', label: 'Resources & Revision', icon: BookOpen, description: 'Keep useful material close, and revisit what matters.' },
   { id: 'design-lab', label: 'System Design Lab', icon: FlaskConical, description: 'Practice your reasoning, one design at a time.' },
   { id: 'jobs', label: 'Job Applications', icon: BriefcaseBusiness, description: 'Track your applications and keep your next steps in view.' },
+  { id: 'career-profile', label: 'Career Profile', icon: BriefcaseBusiness, description: 'Upload your resume and inspect the extracted text.' },
+  { id: 'workspaces', label: 'Application Workspaces', icon: BriefcaseBusiness, description: 'Keep job descriptions, application drafts, and reviews together.' },
   { id: 'settings', label: 'Settings & Backup', icon: Settings, description: 'Make this space your own.' },
 ] as const
 
@@ -85,7 +89,7 @@ function App() {
           <Button variant="secondary" onClick={() => navigate('settings')}>Open backup & recovery</Button>
         </div></section>}
         <p className="sr-only" role="status">{notice}</p>
-        {screen === 'dashboard' ? <Dashboard onNavigate={navigate} /> : screen === 'planner' ? <WeeklyPlanner /> : screen === 'resources' ? <ResourceLibrary /> : screen === 'design-lab' ? <SystemDesignLab /> : screen === 'jobs' ? <JobApplications /> : screen === 'settings' ? <div className="settings-grid">
+        {screen === 'dashboard' ? <Dashboard onNavigate={navigate} /> : screen === 'planner' ? <WeeklyPlanner /> : screen === 'resources' ? <ResourceLibrary /> : screen === 'design-lab' ? <SystemDesignLab /> : screen === 'jobs' ? <JobApplications /> : screen === 'career-profile' ? <CareerProfile /> : screen === 'workspaces' ? <ApplicationWorkspaces /> : screen === 'settings' ? <div className="settings-grid">
           <section className="card settings-card"><h2>Preferences</h2><p>Your choices are saved in this browser.</p>
             <Field id="landing-screen" label="Start on" hint="Choose the first screen shown when you reopen the app.">
               <select id="landing-screen" aria-describedby="landing-screen-help" value={data.preferences.defaultLandingScreen} disabled={blocked} onChange={(event) => {

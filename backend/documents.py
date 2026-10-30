@@ -227,6 +227,13 @@ def image(document_id: str, number: int):
     return FileResponse(DATA / document_id / f'{number}.png', media_type='image/png')
 
 
+from resumes import register as register_resumes
+register_resumes(app, lambda: DATA)
+from profiles import register as register_profiles
+register_profiles(app, lambda: DATA)
+from workspaces import register as register_workspaces
+register_workspaces(app, lambda: DATA)
+
 from indexing import register
 register(app, connect, DATA)
 

@@ -326,3 +326,57 @@ Search indexed PDFs with local dense, BM25 keyword, or hybrid retrieval. Compare
 ## Cited answers (Phase 5)
 
 The PDF library includes **Ask my PDFs**, using LangChain, hybrid retrieval over the three Dynamic Programming PDFs, and configurable Groq generation. Answers include source-page citations, exact evidence quotes, and unreviewed-source labels. See [Groq setup and usage](documentation/cited-qa-phase5.md) and the [Week 2 submission draft](documentation/week2-submission-draft.md). Generation tests are mocked; configure your own local API key/model to try real answers. Tracing and systematic answer evaluation are deferred.
+
+## Career Profile: PDF and DOCX resume ingestion
+
+Start the local backend with `backend/.venv/bin/python backend/documents.py serve`
+and the frontend with `npm run dev`. Open **Career Profile**, choose a text-based
+`.docx` or text-based `.pdf` resume (maximum 5 MiB), and select **Upload and extract**. Inspect the
+extracted text and use **Download original resume** to retrieve the saved file.
+Paragraphs and table text are extracted in document order; formatting, images,
+headers, and footers are not reproduced. Image-only or invalid files are rejected.
+Identical uploads reuse the existing record. Saved resumes reload when reopening
+the screen. Local storage is under `backend/data/library/resumes/` (or the
+`INTERVIEWBUDDY_DATA` directory's `resumes/` child), excluded from Git and browser
+JSON backups. This feature makes no model calls. Structured profile extraction,
+confirmation, and agents are subsequent milestones.
+
+Resume API: `GET /api/resumes`, raw DOCX `POST /api/resumes?filename=resume.docx`
+(with `X-InterviewBuddy: local`), and `GET /api/resumes/{id}/original`.
+
+PDF resume extraction uses local macOS Swift/PDFKit, supports up to 30 pages, and rejects pages without readable text. Scanned PDFs require OCR and are not supported by this resume upload yet. Restart the backend after updating to register PDF support.
+
+### Generate and confirm a career profile
+
+In Career Profile, select a saved resume and click **Generate profile**. This
+explicit action sends its extracted text to the configured Groq model using the
+existing `GROQ_API_KEY` and `GROQ_MODEL` backend configuration. Uploading alone
+still makes no model calls. Generation has a 60-second provider timeout, one bounded evidence-repair attempt, a 60,000-character input limit, and disabled cloud tracing.
+
+Review facts grouped into experience, skills, education, projects, and
+achievements. Edit or remove facts, or add facts with exact supporting resume
+quotes. Exact quote validation establishes text provenance, not semantic support;
+review both the statement and quote. Enter target roles, locations, work
+arrangement, and exclusions separately; preferences are never inferred from the
+resume. **Save draft** persists work; **Confirm profile** saves an explicitly
+reviewed version. Subsequent draft saves clear confirmation. Revision checks
+reject stale writes and preserve edits for recovery. Existing profiles cannot be
+automatically regenerated over user corrections. Different resumes have separate
+profiles. Profiles remain in the local resume SQLite database, outside browser
+backups. No agents, job discovery, or Mem0 writes run at this milestone.
+
+Profile evidence validation tolerates whitespace-only differences and stores the exact original resume span. Changed words, punctuation, or metrics remain rejected. An invalid generated quote triggers one corrective model call; a second failure leaves existing data untouched.
+
+Profile generation now asks Groq for numbered source passage references instead
+of copied quotes. The backend validates IDs and derives verbatim evidence spans
+from the original extracted text. Multiple nearby references include intervening
+text; evidence exceeding 4,000 characters is rejected. This prevents quote-copying
+errors but does not establish semantic support; human confirmation remains required.
+
+## Persistent application workspaces
+
+**Application Workspaces** stores jobs, draft versions, review findings, and review
+reminders in local SQLite, each linked to a preserved confirmed profile version.
+LangGraph SQLite checkpoints support paused setup runs across backend restarts.
+See [workspace usage, API, storage, and limitations](documentation/application-workspaces.md).
+This milestone adds storage and resumable setup; automated drafting is next.
