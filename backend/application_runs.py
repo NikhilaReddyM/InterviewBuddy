@@ -60,7 +60,13 @@ def locked_graph(store, run_id):
         try:
             with SqliteSaver.from_conn_string(str(store.root / 'application-checkpoints.sqlite3')) as saver:
                 with tracing_context(enabled=False):
-                    yield build_graph(saver)
+                    with store.connect() as db:
+                        run = db.execute('SELECT workflow FROM runs WHERE id=?', (run_id,)).fetchone()
+                    if run and run['workflow'] == 'application_v1':
+                        from agent_flow import build_agent_graph
+                        yield build_agent_graph(saver, store, run_id)
+                    else:
+                        yield build_graph(saver)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
@@ -78,15 +84,18 @@ def describe(graph, run):
     state = graph.get_state({'configurable': {'thread_id': run['id']}})
     checkpoint_id = (state.config or {}).get('configurable', {}).get('checkpoint_id')
     return {**run, 'state': state.values, 'checkpoint_id': checkpoint_id,
-            'next': list(state.next), 'paused': any(task.interrupts for task in state.tasks)}
+            'next': list(state.next), 'paused': any(task.interrupts for task in state.tasks),
+            'error': 'A step failed. Retry to continue from the saved checkpoint.' if any(task.error for task in state.tasks) else None}
 
 
 def start_run(store, workspace_id, request_id):
     with store.connect() as db:
         workspace = store.require(db, workspace_id)
-        db.execute('INSERT OR IGNORE INTO runs VALUES (?,?,?,?)', (str(uuid4()), workspace_id, request_id, now()))
+        db.execute('INSERT OR IGNORE INTO runs (id,workspace_id,request_id,created_at) VALUES (?,?,?,?)', (str(uuid4()), workspace_id, request_id, now()))
         run = dict(db.execute('SELECT * FROM runs WHERE workspace_id=? AND request_id=?', (workspace_id, request_id)).fetchone())
         snapshot_id = workspace['profile_snapshot_id']
+        if run['workflow'] != 'setup_v1':
+            raise HTTPException(409, 'This request ID belongs to an application agent run.')
     with locked_graph(store, run['id']) as graph:
         config = {'configurable': {'thread_id': run['id']}, 'callbacks': []}
         state = graph.get_state(config)
@@ -100,6 +109,8 @@ def start_run(store, workspace_id, request_id):
 
 def resume_run(store, workspace_id, run_id, data: ResumeInput):
     run = run_row(store, workspace_id, run_id)
+    if run['workflow'] != 'setup_v1':
+        raise HTTPException(409, 'Use the agent run endpoint for this run.')
     with locked_graph(store, run_id) as graph:
         current = describe(graph, run)
         if current['state'].get('phase') == 'ready_for_agents' and current['state'].get('instructions') == data.instructions:

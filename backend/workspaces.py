@@ -86,6 +86,13 @@ class Store:
                 BEGIN SELECT RAISE(ABORT, 'Draft versions are immutable'); END;
             ''')
 
+        with self.connect() as db:
+            columns = {row['name'] for row in db.execute('PRAGMA table_info(runs)')}
+            if 'workflow' not in columns:
+                db.execute("ALTER TABLE runs ADD COLUMN workflow TEXT NOT NULL DEFAULT 'setup_v1'")
+            if 'input_payload' not in columns:
+                db.execute("ALTER TABLE runs ADD COLUMN input_payload TEXT NOT NULL DEFAULT '{}'")
+
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=30)
@@ -103,7 +110,7 @@ class Store:
             raise HTTPException(404, 'Application workspace not found.')
         return row
 
-    def create(self, data: WorkspaceInput):
+    def create(self, data: WorkspaceInput, profile_snapshot_id=None):
         if data.url:
             from urllib.parse import urlparse
             parsed = urlparse(data.url)
@@ -120,21 +127,27 @@ class Store:
                 if snapshot['resume_id'] != data.resume_id:
                     raise HTTPException(409, 'This request ID belongs to a different resume.')
                 return dict(existing)
-            profile_path = self.root / 'resumes' / 'resumes.sqlite3'
-            if not profile_path.exists():
-                raise HTTPException(409, 'Upload and confirm a career profile first.')
-            profile_db = sqlite3.connect(profile_path)
-            profile_db.row_factory = sqlite3.Row
-            try:
+            if profile_snapshot_id:
+                profile = db.execute('SELECT * FROM profile_snapshots WHERE id=? AND resume_id=?', (profile_snapshot_id, data.resume_id)).fetchone()
+                if not profile:
+                    raise HTTPException(409, 'Discovery profile snapshot not found.')
+                payload, revision, confirmed_at = profile['payload'], profile['profile_revision'], profile['confirmed_at']
+            else:
+                profile_path = self.root / 'resumes' / 'resumes.sqlite3'
+                if not profile_path.exists():
+                    raise HTTPException(409, 'Upload and confirm a career profile first.')
+                profile_db = sqlite3.connect(profile_path)
+                profile_db.row_factory = sqlite3.Row
                 try:
-                    profile = profile_db.execute('SELECT * FROM career_profiles WHERE resume_id=?', (data.resume_id,)).fetchone()
-                except sqlite3.OperationalError:
-                    profile = None
-                if not profile or not profile['confirmed_at']:
-                    raise HTTPException(409, 'Confirm this resume’s career profile before creating an application workspace.')
-                payload, revision, confirmed_at = profile['payload'], profile['revision'], profile['confirmed_at']
-            finally:
-                profile_db.close()
+                    try:
+                        profile = profile_db.execute('SELECT * FROM career_profiles WHERE resume_id=?', (data.resume_id,)).fetchone()
+                    except sqlite3.OperationalError:
+                        profile = None
+                    if not profile or not profile['confirmed_at']:
+                        raise HTTPException(409, 'Confirm this resume’s career profile before creating an application workspace.')
+                    payload, revision, confirmed_at = profile['payload'], profile['revision'], profile['confirmed_at']
+                finally:
+                    profile_db.close()
             snapshot_id = hashlib.sha256(f'{data.resume_id}:{revision}'.encode()).hexdigest()
             db.execute('INSERT OR IGNORE INTO profile_snapshots VALUES (?,?,?,?,?,?)',
                        (snapshot_id, data.resume_id, revision, payload, confirmed_at, now()))
@@ -230,3 +243,7 @@ def register(app, data_dir):
 
     from application_runs import register as register_runs
     register_runs(app, store)
+    from agent_flow import register as register_agents
+    register_agents(app, store)
+    from discovery import register as register_discovery
+    register_discovery(app, store)

@@ -380,3 +380,20 @@ reminders in local SQLite, each linked to a preserved confirmed profile version.
 LangGraph SQLite checkpoints support paused setup runs across backend restarts.
 See [workspace usage, API, storage, and limitations](documentation/application-workspaces.md).
 This milestone adds storage and resumable setup; automated drafting is next.
+
+## Application agents for a pasted job
+
+In an Application Workspace, use **Prepare application** to run the Analyst,
+Coordinator, Writer, and Reviewer against the saved job and confirmed profile.
+The workflow may pause for clarification, revise drafts, recommend skipping a role,
+or finish with materials ready for your review. See [agent flow usage and recovery](documentation/application-agent-flow.md).
+This explicit action uses your configured Groq provider; job search and submission
+are not part of this milestone.
+
+## Find opportunities and prepare review drafts
+
+**Find Opportunities** searches supported public job feeds, matches jobs against a
+confirmed profile, prepares drafts without intermediate questions, and saves
+review reminders. Read [coverage, operation, recovery, and scheduling preparation](documentation/opportunity-discovery.md).
+Runs are triggered manually today; no recurring schedule is installed. The worker
+can run independently of the UI for future scheduling.

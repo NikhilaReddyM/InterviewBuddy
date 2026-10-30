@@ -48,3 +48,15 @@
 .workspace-reminder p { margin: 0; }
 .career-panel > summary { cursor: pointer; font-weight: 600; }
 .career-panel > .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.agent-panel { border: 1px solid var(--border); background: var(--soft); border-radius: 12px; padding: 24px; margin: 24px 0; }
+.agent-panel > .actions, .agent-results .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.agent-results { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 22px; margin-top: 20px; }
+.agent-requirement { border-bottom: 1px solid var(--border); padding: 12px 0; }
+.agent-requirement p { margin-bottom: 8px; }
+.agent-panel blockquote { border-left: 3px solid var(--accent); padding-left: 14px; margin: 12px 0; overflow-wrap: anywhere; }
+.agent-panel blockquote p { margin-bottom: 6px; }
+.agent-panel small { white-space: pre-wrap; }
+.agent-panel li { padding: 6px 0; line-height: 1.6; }
+.agent-confirm { display: flex; align-items: center; gap: 10px; margin: 18px 0; }
+.agent-draft-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .agent-panel, .agent-results { padding: 16px; } }

@@ -13,7 +13,7 @@ Install backend dependencies with `backend/.venv/bin/pip install -r backend/requ
 5. Under **Workflow setup & saved runs**, prepare a run. It persists and pauses
    for application instructions. Reopen it later and save instructions to resume.
 
-This milestone is persistence infrastructure. Drafts are entered manually; future
+The original setup flow described here is persistence infrastructure. For the new application agents, see [the agent flow guide](application-agent-flow.md). Drafts are entered manually; future
 agents will use the same backend records. The setup graph finishes at
 `ready_for_agents`, which does not indicate an application has been generated,
 reviewed, approved, or submitted. It performs no model calls or external actions.

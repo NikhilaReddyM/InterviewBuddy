@@ -17,7 +17,7 @@ export const RESOURCE_SOURCES = [
   'Source 3', 'Notion', 'Other',
 ] as const
 export const RESOURCE_STATUSES = ['Not Started', 'In Progress', 'Reviewed'] as const
-export const SCREENS = ['dashboard', 'planner', 'resources', 'design-lab', 'jobs', 'career-profile', 'workspaces', 'settings'] as const
+export const SCREENS = ['dashboard', 'planner', 'resources', 'design-lab', 'jobs', 'career-profile', 'workspaces', 'opportunities', 'settings'] as const
 export const THEMES = ['light', 'dark'] as const
 
 export const preparationAreaSchema = z.enum(PREPARATION_AREAS)
