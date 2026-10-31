@@ -207,6 +207,12 @@ def build_agent_graph(saver, store, run_id):
             phase = 'needs_review'
         else:
             phase = 'ready_for_review'
+        from reviews import ensure_reminder
+        with store.connect() as db:
+            run_record = db.execute('SELECT request_id FROM runs WHERE id=?', (run_id,)).fetchone()
+        discovery_managed = state['context'].get('discovery_managed') or (run_record and run_record['request_id'].startswith('discovery:'))
+        if not discovery_managed:
+            ensure_reminder(store, state['workspace_id'], phase)
         return {'phase': phase, 'events': event(state, 'Run finished: ' + phase.replace('_', ' ') + '. No application was submitted.')}
 
     def route(state):
@@ -263,7 +269,7 @@ def start_agents(store, workspace_id, data: AgentStart):
             'run_id': run['id'], 'phase': 'starting', 'writer_count': 0, 'clarification_count': 0, 'answers': [], 'events': [],
             'context': {'job': {key: detail[key] for key in ('company', 'role', 'description')}, 'facts': facts,
                         'preferences': detail['profile_snapshot']['profile'].get('preferences', {}),
-                        'instructions': data.instructions, 'autonomous': data.autonomous, 'screening_questions': data.screening_questions}})
+                        'instructions': data.instructions, 'autonomous': data.autonomous, 'discovery_managed': data.request_id.startswith('discovery:'), 'screening_questions': data.screening_questions}})
 
 
 def require_agent_run(store, workspace_id, run_id):

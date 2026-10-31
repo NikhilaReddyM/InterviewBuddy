@@ -21,13 +21,13 @@ from workspaces import Store, StrictModel, WorkspaceInput, ReminderInput, now
 class DiscoveryInput(StrictModel):
     resume_id: str = Field(min_length=1, max_length=100)
     max_applications: int = Field(default=3, ge=1, le=3)
-    review_date: date
+    review_date: date | None = None
     request_id: str = Field(min_length=1, max_length=100)
 
 
 class ReassessInput(StrictModel):
     request_id: str = Field(min_length=1, max_length=100)
-    review_date: date
+    review_date: date | None = None
 
 
 def reassess_batch(store, old_batch_id, data):
@@ -102,12 +102,19 @@ def save_progress(store, batch_id, progress, status='running'):
 
 def create_batch(store, data, different_from=None):
     setup(store)
+    use_default_date = data.review_date is None
+    if use_default_date:
+        from reviews import reminder_date
+        data = data.model_copy(update={'review_date': reminder_date(store)})
     payload = json.dumps(data.model_dump(mode='json', exclude={'request_id'}), sort_keys=True)
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         existing = db.execute('SELECT * FROM discovery_batches WHERE request_id=?', (data.request_id,)).fetchone()
         if existing:
-            if existing['input_payload'] != payload:
+            expected = json.loads(payload)
+            if use_default_date:
+                expected['review_date'] = json.loads(existing['input_payload'])['review_date']
+            if json.loads(existing['input_payload']) != expected:
                 raise HTTPException(409, 'This request ID already belongs to different discovery settings.')
             return existing['id']
         path = store.root / 'resumes/resumes.sqlite3'
@@ -288,6 +295,8 @@ def _process_batch(store, batch_id):
                 description = f"{job['description']}\n\nSource: {job['source']}\nRequired location: {job['location']}\nRemote: {job['remote']}"
                 workspace = store.create(WorkspaceInput(resume_id=batch['resume_id'], company=job['company'], role=job['role'],
                     description=description, url=job['url'], request_id=workspace_key), profile_snapshot_id=batch['snapshot_id'])
+                from reviews import save_match, ensure_reminder
+                save_match(store, workspace['id'], match)
                 item['workspace_id'] = workspace['id']
                 parent_id = progress.get('previous_workspaces', {}).get(candidate_id)
                 if parent_id:
@@ -307,16 +316,7 @@ def _process_batch(store, batch_id):
                     item['error'] = run.get('error') or 'Run unexpectedly paused; no answers were fabricated.'
                 else:
                     item.pop('error', None)
-                if store.detail(workspace['id'])['drafts'] and item['status'] != 'role_not_recommended':
-                    note = ('Review application drafts' if item['status'] == 'ready_for_review' else 'Check incomplete application drafts and unresolved findings')
-                    reminder_key = f'discovery-review:{candidate_id}'
-                    with store.connect() as db:
-                        existing_reminder = db.execute('SELECT id FROM reminders WHERE workspace_id=? AND request_id=?', (workspace['id'], reminder_key)).fetchone()
-                        if existing_reminder:
-                            db.execute('UPDATE reminders SET note=?,done=0 WHERE id=?', (note, existing_reminder['id']))
-                    if not existing_reminder:
-                        store.add_reminder(workspace['id'], ReminderInput(due_date=batch['input']['review_date'],
-                            note=note, request_id=reminder_key))
+                ensure_reminder(store, workspace['id'], item['status'], batch['input']['review_date'])
                 progress['events'].append(f"{job['company']} · {job['role']}: {item['status'].replace('_', ' ')}.")
                 save_progress(store, batch_id, progress)
                 if run.get('error_status') == 429:
@@ -368,10 +368,21 @@ def register(app, store_factory):
     @app.get('/api/discovery/review-queue')
     def review_queue():
         store = store_factory()
+        from reviews import setup as setup_reviews
+        setup_reviews(store)
         with store.connect() as db:
-            return [dict(row) for row in db.execute('''SELECT r.*, w.company, w.role, w.url
+            rows = db.execute('''SELECT r.*, w.company, w.role, w.url,p.profile_revision,m.payload AS match_payload,
+                (SELECT COUNT(*) FROM drafts d WHERE d.workspace_id=w.id) AS draft_count
                 FROM reminders r JOIN workspaces w ON r.workspace_id=w.id
-                WHERE r.done=0 ORDER BY r.due_date, r.created_at''')]
+                JOIN profile_snapshots p ON w.profile_snapshot_id=p.id
+                LEFT JOIN workspace_matches m ON m.workspace_id=w.id
+                WHERE r.done=0 ORDER BY r.due_date, r.created_at''').fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item['match'] = json.loads(item.pop('match_payload')) if item['match_payload'] else None
+                result.append(item)
+            return result
 
     @app.get('/api/discovery/{batch_id}')
     def get_batch(batch_id: str):

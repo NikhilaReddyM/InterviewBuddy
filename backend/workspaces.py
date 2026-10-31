@@ -234,7 +234,11 @@ def register(app, data_dir):
 
     @app.post('/api/workspaces/{workspace_id}/drafts')
     def add_draft(workspace_id: str, data: DraftInput):
-        return store().add_draft(workspace_id, data)
+        current = store()
+        saved = current.add_draft(workspace_id, data)
+        from reviews import ensure_reminder
+        ensure_reminder(current, workspace_id, 'needs_review')
+        return saved
 
     @app.post('/api/workspaces/{workspace_id}/findings')
     def add_finding(workspace_id: str, data: FindingInput):
@@ -259,3 +263,5 @@ def register(app, data_dir):
     register_agents(app, store)
     from discovery import register as register_discovery
     register_discovery(app, store)
+    from reviews import register as register_reviews
+    register_reviews(app, store)

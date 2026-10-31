@@ -64,3 +64,4 @@
 .career-cooldown h4 { margin: 0 0 10px; }
 .career-cooldown [role='timer'] { font-variant-numeric: tabular-nums; font-size: 1.4rem; color: var(--accent); }
 .career-cooldown p:last-child { margin-bottom: 0; }
+.review-draft-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; max-height: 500px; overflow: auto; }

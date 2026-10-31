@@ -397,3 +397,11 @@ confirmed profile, prepares drafts without intermediate questions, and saves
 review reminders. Read [coverage, operation, recovery, and scheduling preparation](documentation/opportunity-discovery.md).
 Runs are triggered manually today; no recurring schedule is installed. The worker
 can run independently of the UI for future scheduling.
+
+## Application review queue
+
+Open **Review applications** from the Dashboard, or select a reminder in **Find
+Opportunities**, to review match reasoning, gaps, unanswered questions, and draft
+materials. Edit drafts as new versions and follow the original application link.
+Automatic reminders use configurable delay/timezone preferences and do not
+reappear merely because a run is retried. See [review queue usage and behavior](documentation/application-review-queue.md).

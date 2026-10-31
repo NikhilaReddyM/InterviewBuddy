@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Search, Bell, ExternalLink } from 'lucide-react'
+import { ReviewPreferences } from './ReviewPreferences'
 import { CooldownStatus } from './CooldownStatus'
 import { Button } from '../../components/Button'
 import { useToday } from '../../utils/useToday'
@@ -8,7 +9,7 @@ import '../career-profile/career-profile.css'
 type Job = { candidate_id: string; company: string; role: string; source: string; location: string; url: string }
 type Match = { candidate_id: string; eligible: boolean; score: number; reason: string; cautions: string[] }
 type Batch = { id: string; status: string; is_running?: boolean; cooldown_until?: number | null; server_time?: number; profile_revision?: number; profile_preferences?: { target_roles?: string; locations?: string; remote?: string; exclusions?: string }; created_at: string; progress: { error?: string; retry_at?: number; source_errors?: string[]; events: string[]; candidates?: Job[]; reassesses_batch_id?: string; match_results?: Match[]; matches?: Match[]; items: { candidate_id: string; workspace_id?: string; status: string; error?: string; outcome_reason?: string; match: Match }[] } }
-type Reminder = { id: string; workspace_id: string; due_date: string; company: string; role: string; note: string }
+type Reminder = { profile_revision?: number; draft_count?: number; match?: Match | null; url?: string; id: string; workspace_id: string; due_date: string; company: string; role: string; note: string }
 type Resume = { id: string; filename: string }
 async function get<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, body === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-InterviewBuddy': 'local' }, body: JSON.stringify(body) })
@@ -32,6 +33,7 @@ export function Opportunities({ onOpenWorkspace }: { onOpenWorkspace: (workspace
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [reload, setReload] = useState(0)
+  const [useReminderPreferences, setUseReminderPreferences] = useState(true)
   const [form, setForm] = useState(() => ({ resume_id: '', max_applications: 3, review_date: today, request_id: crypto.randomUUID() }))
   useEffect(() => {
     let active = true
@@ -52,7 +54,7 @@ export function Opportunities({ onOpenWorkspace }: { onOpenWorkspace: (workspace
   async function start() {
     setBusy(true); setError(''); setNotice('')
     try {
-      const batch = await get<Batch>('/api/discovery', form)
+      const batch = await get<Batch>('/api/discovery', { ...form, review_date: useReminderPreferences ? null : form.review_date })
       setBatches(items => [batch, ...items.filter(item => item.id !== batch.id)])
       setForm({ ...form, request_id: crypto.randomUUID() })
       setNotice('Search started. The agents will prepare drafts and reminders without asking intermediate questions. You can leave this screen while the backend is running.')
@@ -64,11 +66,13 @@ export function Opportunities({ onOpenWorkspace }: { onOpenWorkspace: (workspace
     <section className="card career-panel"><div className="career-section-heading"><div><p className="eyebrow">JOB DISCOVERY</p><h2>Find opportunities. Review when ready.</h2></div><Search aria-hidden="true" /></div>
       <p>The agents find relevant roles, filter against your confirmed profile and preferences, prepare drafts, and add review reminders. Unknown details are flagged for your final review.</p>
       <p className="subtle">Coverage: <a href="https://remotive.com" target="_blank" rel="noreferrer">Remotive</a> remote roles and <a href="https://www.arbeitnow.com" target="_blank" rel="noreferrer">Arbeitnow</a> mainly European jobs. Location restrictions still apply to remote roles. Listings can be delayed or closed by the time you review them.</p>
-      <form onSubmit={event => { event.preventDefault(); void start() }}><fieldset disabled={busy || active} className="workspace-fields"><div className="career-preference-grid"><div className="field"><label htmlFor="discovery-profile">Resume profile</label><select id="discovery-profile" required value={form.resume_id} onChange={event => setForm({ ...form, resume_id: event.target.value, request_id: crypto.randomUUID() })}><option value="">Choose a confirmed profile</option>{resumes.map(resume => <option value={resume.id} key={resume.id}>{resume.filename}</option>)}</select><p className="field-hint">Set target roles, locations, and exclusions in Career Profile, then confirm it.</p></div><div className="field"><label htmlFor="discovery-limit">Maximum applications per run</label><select id="discovery-limit" value={form.max_applications} onChange={event => setForm({ ...form, max_applications: Number(event.target.value), request_id: crypto.randomUUID() })}>{[1, 2, 3].map(value => <option key={value} value={value}>{value}</option>)}</select></div><div className="field"><label htmlFor="discovery-date">Remind me to review on</label><input id="discovery-date" type="date" required value={form.review_date} onChange={event => setForm({ ...form, review_date: event.target.value, request_id: crypto.randomUUID() })} /></div></div>
+      <form onSubmit={event => { event.preventDefault(); void start() }}><fieldset disabled={busy || active} className="workspace-fields"><div className="career-preference-grid"><div className="field"><label htmlFor="discovery-profile">Resume profile</label><select id="discovery-profile" required value={form.resume_id} onChange={event => setForm({ ...form, resume_id: event.target.value, request_id: crypto.randomUUID() })}><option value="">Choose a confirmed profile</option>{resumes.map(resume => <option value={resume.id} key={resume.id}>{resume.filename}</option>)}</select><p className="field-hint">Set target roles, locations, and exclusions in Career Profile, then confirm it.</p></div><div className="field"><label htmlFor="discovery-limit">Maximum applications per run</label><select id="discovery-limit" value={form.max_applications} onChange={event => setForm({ ...form, max_applications: Number(event.target.value), request_id: crypto.randomUUID() })}>{[1, 2, 3].map(value => <option key={value} value={value}>{value}</option>)}</select></div><div className="field"><label htmlFor="discovery-date">Remind me to review on</label><input id="discovery-date" type="date" disabled={useReminderPreferences} required={!useReminderPreferences} value={form.review_date} onChange={event => setForm({ ...form, review_date: event.target.value, request_id: crypto.randomUUID() })} /></div></div>
+      <label className="agent-confirm"><input type="checkbox" checked={useReminderPreferences} onChange={event => { setUseReminderPreferences(event.target.checked); setForm({ ...form, request_id: crypto.randomUUID() }) }} />Use configured reminder timing instead of a specific date</label>
       <p className="subtle">Starting sends profile facts and preferences to Groq for matching and drafting. Public job feeds receive no resume information. The backend must stay running; scheduled execution and email are not enabled yet.</p><Button type="submit"><Search size={17} />{busy ? 'Starting…' : active ? 'Discovery in progress…' : 'Find opportunities'}</Button></fieldset></form>
       {notice && <p role="status" className="career-notice">{notice}</p>}{error && <div role="alert" className="career-error"><p>{error}</p><Button variant="secondary" onClick={() => setReload(value => value + 1)}>Reload opportunities</Button></div>}
     </section>
-    <section className="card career-panel"><div className="career-section-heading"><h2><Bell size={20} aria-hidden="true" /> Your review reminders</h2><span className="career-badge">{queue.length} pending</span></div>{queue.length ? queue.map(item => <div className="workspace-reminder" key={item.id}><div><strong>{item.company} · {item.role}</strong><p>{item.due_date}{item.due_date < today ? ' · Overdue' : item.due_date === today ? ' · Today' : ''} · {item.note}</p></div><Button variant="secondary" onClick={() => { if (item.workspace_id) onOpenWorkspace(item.workspace_id) }}>Review drafts</Button></div>) : <p>Your prepared applications and review reminders will appear here.</p>}</section>
+    <section className="card career-panel"><div className="career-section-heading"><h2><Bell size={20} aria-hidden="true" /> Your review reminders</h2><span className="career-badge">{queue.length} pending</span></div>{queue.length ? queue.map(item => <div className="workspace-reminder" key={item.id}><div><strong>{item.company} · {item.role}</strong>{item.profile_revision && <p>Profile version {item.profile_revision} · {item.draft_count ?? 0} saved draft versions</p>}{item.match && <p>{item.match.reason}</p>}<p>{item.due_date}{item.due_date < today ? ' · Overdue' : item.due_date === today ? ' · Today' : ''} · {item.note}</p></div><Button variant="secondary" onClick={() => { if (item.workspace_id) onOpenWorkspace(item.workspace_id) }}>Review drafts</Button></div>) : <p>Your prepared applications and review reminders will appear here.</p>}</section>
+    <ReviewPreferences />
     <section className="card career-panel"><h2>Discovery history</h2>{!batches.length && <p>No discovery runs yet.</p>}{batches.map(batch => <div className="agent-results" key={batch.id}><div className="career-section-heading"><h3>{new Date(batch.created_at).toLocaleString()}</h3><span className="career-badge">{batch.status}</span></div>
       {batch.profile_preferences && <section className="agent-requirement" aria-label="Preferences used for this batch"><h4>Preferences used · Profile version {batch.profile_revision}</h4><dl>
         <dt>Target roles</dt><dd>{batch.profile_preferences.target_roles || 'Not specified'}</dd>
@@ -88,7 +92,7 @@ export function Opportunities({ onOpenWorkspace }: { onOpenWorkspace: (workspace
         const key = reassessKeys.current[batch.id] ?? crypto.randomUUID()
         reassessKeys.current[batch.id] = key
         try {
-          const created = await get<Batch>(`/api/discovery/${batch.id}/reassess`, { request_id: key, review_date: form.review_date })
+          const created = await get<Batch>(`/api/discovery/${batch.id}/reassess`, { request_id: key, review_date: useReminderPreferences ? null : form.review_date })
           setBatches(items => [created, ...items.filter(item => item.id !== created.id)])
           delete reassessKeys.current[batch.id]
           setNotice('Reassessment started with your latest confirmed profile. Previous drafts are preserved. New results and reminders will appear here.')
