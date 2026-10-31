@@ -58,6 +58,16 @@ class Decision(Output):
     questions: list[str] = Field(max_length=5)
 
 
+class FormAnswer(Output):
+    name: str
+    answer: str | None
+    source_ids: list[str] = Field(max_length=30)
+
+
+class FormAnswers(Output):
+    answers: list[FormAnswer] = Field(max_length=60)
+
+
 class SearchPlan(Output):
     keywords: list[str] = Field(min_length=1, max_length=6)
     rationale: str
@@ -113,10 +123,15 @@ PROMPTS['job_matcher'] = ('Evaluate each supplied job against confirmed candidat
     'Hybrid is not fully remote; unknown workplace is not evidence of on-site work. Unknown eligibility or '
     'missing qualifications must be cautions, never invented candidate facts. Use supplied relevant_fact_ids. '
     'Score relevance 0–100; eligible means suitable to PREPARE a draft, not verified hiring eligibility.')
-SCHEMAS = {'search_planner': SearchPlan, 'job_matcher': Matches, 'analyst': Analysis, 'writer': Package, 'reviewer': Review, 'coordinator': Decision}
+PROMPTS['form_answers'] = ('Prepare answers to the supplied employer application fields using ONLY confirmed facts. '
+    'Return one entry per field name. Use source_ids supporting every candidate claim. '
+    'Return null and no IDs for unknown answers. Never guess personal declarations, eligibility, consent, '
+    'demographics, compensation or contact details. For choice fields use an exact supplied choice label. '
+    'Keep answers concise and tailored; missing evidence means unanswered.')
+SCHEMAS = {'form_answers': FormAnswers, 'search_planner': SearchPlan, 'job_matcher': Matches, 'analyst': Analysis, 'writer': Package, 'reviewer': Review, 'coordinator': Decision}
 
 
-OUTPUT_TOKENS = {'search_planner': 1024, 'job_matcher': 2048, 'coordinator': 1536,
+OUTPUT_TOKENS = {'form_answers': 4096, 'search_planner': 1024, 'job_matcher': 2048, 'coordinator': 1536,
                  'analyst': 3072, 'writer': 4096, 'reviewer': 3072}
 
 

@@ -431,3 +431,11 @@ See [setup, content, duplicate protection, and delivery limitations](documentati
 ### Local Ollama models
 
 Career profiles, application agents, discovery, and PDF Q&A can use local Qwen instead of Groq. Set `LLM_PROVIDER=ollama` and `OLLAMA_MODEL=qwen3:8b` in `backend/.env`, keep Ollama running, and restart the backend. See [provider setup and recovery](documentation/model-providers.md). Groq remains the default; providers never switch automatically.
+
+### Employer forms and browser review
+
+Greenhouse applications can now have persistent field answers and resume attachments
+restored in a dedicated browser for final human submission. Optional browser setup,
+scheduled preparation, privacy and supported-site limits are documented in
+[employer application preparation](documentation/employer-application-forms.md).
+Find Opportunities now groups settings and provides compact, searchable run history.

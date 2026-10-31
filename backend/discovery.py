@@ -393,6 +393,9 @@ def _process_batch(store, batch_id):
                     item['error'] = run.get('error') or 'Run unexpectedly paused; no answers were fabricated.'
                 else:
                     item.pop('error', None)
+                if item['status'] in ('ready_for_review', 'needs_review'):
+                    from application_forms import prepare_discovered
+                    prepare_discovered(store, workspace['id'], job)
                 ensure_reminder(store, workspace['id'], item['status'], batch['input']['review_date'])
                 progress['events'].append(f"{job['company']} · {job['role']}: {item['status'].replace('_', ' ')}.")
                 save_progress(store, batch_id, progress)
@@ -465,6 +468,8 @@ def register(app, store_factory):
             for row in rows:
                 item = dict(row)
                 item['match'] = json.loads(item.pop('match_payload')) if item['match_payload'] else None
+                from application_forms import read as read_form
+                item['form_status'] = read_form(store, item['workspace_id'])['status']
                 result.append(item)
             return result
 

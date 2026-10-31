@@ -163,8 +163,9 @@ def preview(store, current_time=None):
         if bundle['phase'] == 'role_not_recommended':
             label = 'Role not recommended — check before proceeding'
         link = settings['app_base_url'] + '/?' + urlencode({'workspace_id': row['id']})
+        form = bundle.get('application_form', {})
         items.append({'workspace_id': row['id'], 'company': bundle['company'], 'role': bundle['role'],
-            'due_date': row['due'], 'status': label, 'review_url': link, 'application_url': bundle['url'],
+            'due_date': row['due'], 'status': label, 'form_status': form.get('status', 'not_prepared'), 'review_url': link, 'application_url': bundle['url'],
             'reason': (bundle['match'] or {}).get('reason', '')[:1000],
             'warnings': list(dict.fromkeys(bundle['gaps'] + bundle['unresolved_questions'] + (bundle['match'] or {}).get('cautions', [])))[:5]})
     subject = f'InterviewBuddy: {len(items)} application reviews — {current.date().isoformat()}'
@@ -174,6 +175,8 @@ def preview(store, current_time=None):
         if item['reason']:
             lines.append('Why it matched: ' + item['reason'])
         lines.extend('Check: ' + warning for warning in item['warnings'])
+        if item['form_status'] != 'not_prepared':
+            lines.append('Employer form: ' + item['form_status'].replace('_', ' ') + ' — open InterviewBuddy to review or restore saved answers.')
         lines.extend(['Review in InterviewBuddy: ' + item['review_url'], 'Original application: ' + item['application_url'], ''])
     if not items:
         lines.append('No pending application reviews with saved drafts are due in this window.')

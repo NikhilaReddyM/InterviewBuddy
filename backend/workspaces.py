@@ -269,3 +269,6 @@ def register(app, data_dir):
     register_schedules(app, store)
     from email_digest import register as register_digest
     register_digest(app, store)
+
+    from application_forms import register as register_forms
+    register_forms(app, store)

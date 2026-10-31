@@ -68,3 +68,26 @@
 
 .schedule-days { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 18px 0; display: flex; flex-wrap: wrap; gap: 16px; }
 .schedule-days label { display: inline-flex; gap: 8px; align-items: center; }
+
+.opportunity-navigation { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0; }
+.opportunity-navigation a { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 24px; border: 1px solid var(--border); text-decoration: none; color: var(--text); background: var(--surface); font-weight: 600; }
+.opportunity-navigation a:hover { border-color: var(--accent); color: var(--accent); }
+.opportunity-navigation span { font-size: .8rem; opacity: .65; }
+.opportunity-settings { padding: 22px; }
+.opportunity-settings > summary { cursor: pointer; font-size: 1.05rem; font-weight: 650; }
+.opportunity-settings > summary > span { display: block; padding: 8px 0 0 18px; font-weight: 400; font-size: .88rem; color: var(--muted); }
+.opportunity-settings[open] > summary { margin-bottom: 24px; }
+.run-history-controls { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(200px, 2fr); gap: 16px; margin: 20px 0; }
+.discovery-run { border: 1px solid var(--border); border-radius: 12px; margin: 12px 0; overflow: hidden; }
+.discovery-run > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; background: var(--surface); }
+.discovery-run > summary::before { content: '▸'; color: var(--accent); }
+.discovery-run[open] > summary::before { content: '▾'; }
+.discovery-run > summary > span:first-of-type { flex: 1; }
+.discovery-run > summary small { display: block; font-size: .85rem; margin-top: 5px; color: var(--muted); }
+.discovery-run .agent-results { border: 0; border-top: 1px solid var(--border); border-radius: 0; margin: 0; }
+.run-status { border-radius: 20px; padding: 5px 10px; background: var(--soft); font-size: .8rem; font-weight: 650; white-space: nowrap; }
+.run-status--running, .run-status--queued { color: var(--accent); }
+.application-form-panel { margin: 20px 0; padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.application-form-panel .actions { margin: 16px 0; }
+@media (max-width: 600px) { .run-history-controls { grid-template-columns: 1fr; } .discovery-run > summary { padding: 14px; } .application-form-panel { padding: 16px; } }
+@media (min-width: 1100px) { .discovery-controls .career-preference-grid { grid-template-columns: 1.4fr 1fr 1fr; } }

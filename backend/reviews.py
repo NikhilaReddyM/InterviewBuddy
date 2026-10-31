@@ -143,7 +143,8 @@ def review_bundle(store, workspace_id):
     latest_drafts = {}
     for draft in drafts:
         latest_drafts[draft['kind']] = {**draft, 'based_on': edits.get(draft['id']), 'human_edited': draft['id'] in edits}
-    return {'workspace_id': workspace_id, 'match': match_payload,
+    from application_forms import read as read_form
+    return {'application_form': read_form(store, workspace_id), 'workspace_id': workspace_id, 'match': match_payload,
             'phase': state.get('phase', 'drafts_saved' if drafts else 'not_started'), 'processing': active,
             'analysis_summary': analysis.get('summary', ''),
             'gaps': list(dict.fromkeys([item['gap'] for item in analysis.get('requirements', []) if item['gap']] + analysis.get('concerns', []))),
