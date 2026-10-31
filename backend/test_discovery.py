@@ -382,10 +382,13 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(response.json()['status'], 'failed')
             process.assert_not_called()
 
-    def test_registration_does_not_install_an_automatic_retry_worker(self):
-        from fastapi import FastAPI
-        from workspaces import register
-        app = FastAPI()
-        original_lifespan = app.router.lifespan_context
-        register(app, lambda: self.root)
-        self.assertIs(app.router.lifespan_context, original_lifespan)
+    def test_scheduler_does_not_automatically_resume_waiting_batches(self):
+        from discovery import save_progress
+        from discovery_schedules import tick
+        progress = batch_detail(self.store, self.batch_id)['progress']
+        progress['retry_at'] = 0
+        save_progress(self.store, self.batch_id, progress, 'waiting')
+        with patch('discovery.process_batch') as process:
+            tick(self.store)
+            process.assert_not_called()
+        self.assertEqual(batch_detail(self.store, self.batch_id)['status'], 'waiting')

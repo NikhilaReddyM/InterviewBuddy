@@ -108,7 +108,8 @@ PROMPTS['search_planner'] = ('Choose short job-search keywords using target role
     'Avoid personal identifiers. Return 1–6 practical terms, not whole sentences.')
 PROMPTS['job_matcher'] = ('Evaluate each supplied job against confirmed candidate facts and preferences. '
     'Return one match entry per candidate_id. Reject explicit role, work-mode, location or exclusion conflicts. '
-    'A remote listing is not necessarily worldwide: respect candidate_required_location. Unknown eligibility or '
+    'A remote listing is not necessarily worldwide: respect location restrictions and the workplace field. '
+    'Hybrid is not fully remote; unknown workplace is not evidence of on-site work. Unknown eligibility or '
     'missing qualifications must be cautions, never invented candidate facts. Use supplied relevant_fact_ids. '
     'Score relevance 0–100; eligible means suitable to PREPARE a draft, not verified hiring eligibility.')
 SCHEMAS = {'search_planner': SearchPlan, 'job_matcher': Matches, 'analyst': Analysis, 'writer': Package, 'reviewer': Review, 'coordinator': Decision}

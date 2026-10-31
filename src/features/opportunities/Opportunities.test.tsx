@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Opportunities } from './Opportunities'
@@ -62,7 +62,7 @@ it('shows preferences and partial rejection decisions before matching finishes',
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response([batch])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([])))
   render(<Opportunities onOpenWorkspace={vi.fn()} />)
   expect(await screen.findByRole('region', { name: 'Preferences used for this batch' })).toHaveTextContent('US')
-  expect(screen.getByText('hybrid')).toBeInTheDocument()
+  expect(within(screen.getByRole('region', { name: 'Preferences used for this batch' })).getByText('hybrid')).toBeInTheDocument()
   await userEvent.click(screen.getByText('Matching decisions and activity'))
   expect(screen.getByText(/Netherlands location conflicts with US preference/)).toBeVisible()
   expect(screen.getByText(/does not search for new jobs/)).toBeInTheDocument()

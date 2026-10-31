@@ -9,12 +9,12 @@ import sqlite3
 import time
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks, HTTPException, Query
 from pydantic import Field
 import application_agents as agents
 from agent_flow import AgentStart, start_agents, drive
 from application_runs import locked_graph, describe, run_row
-from job_sources import cached_feed
+from job_sources import cached_feed, source_registry
 from workspaces import Store, StrictModel, WorkspaceInput, ReminderInput, now
 
 
@@ -165,13 +165,31 @@ def job_identity(job):
     return hashlib.sha256(value.encode()).hexdigest()[:32]
 
 
+def location_matches(query, location):
+    query = query.strip().casefold()
+    location = location.casefold()
+    if not query:
+        return True
+    if query in ('us', 'usa', 'u.s.', 'united states', 'united states of america'):
+        return bool(re.search(r'\b(united states|usa|u\.s\.|new york|nyc|san francisco|seattle|boston|austin|chicago|denver|atlanta|los angeles|san diego|palo alto|san jose|mountain view|washington dc)\b|,\s*(ny|ca|wa|ma|tx|co|ga|il|va|nc|nj|fl)\b', location))
+    if query in ('europe', 'eu', 'emea'):
+        return bool(re.search(r'\b(europe|emea|germany|berlin|netherlands|amsterdam|france|paris|ireland|dublin|united kingdom|london|spain|madrid|poland|warsaw|sweden|stockholm|switzerland|zurich|portugal|lisbon|italy|milan|romania|bucharest)\b', location))
+    if query == 'nyc':
+        return 'new york' in location or 'nyc' in location
+    return query in location
+
+
+def job_mode(job):
+    return job.get('workplace', 'remote' if job.get('remote') else 'unknown')
+
+
 def shortlist(jobs, plan, preferences):
     keywords = re.findall(r'[a-z0-9+#]+', ' '.join(plan['keywords']).casefold())
     unique = {}
     for job in jobs:
-        if preferences.get('remote') == 'remote' and not job['remote']:
-            continue
-        if preferences.get('remote') == 'onsite' and job['remote']:
+        mode = job_mode(job)
+        desired = preferences.get('remote')
+        if desired in ('remote', 'hybrid', 'onsite') and mode != 'unknown' and mode != desired:
             continue
         identity = job_identity(job)
         if identity in unique:
@@ -180,8 +198,41 @@ def shortlist(jobs, plan, preferences):
         body = job['description'].casefold()
         score = sum(5 if word in title else 1 if word in body else 0 for word in keywords)
         if score:
+            if preferences.get('locations') and location_matches(preferences['locations'], job['location']):
+                score += 30
+            if desired in ('remote', 'hybrid', 'onsite') and mode == desired:
+                score += 10
             unique[identity] = {**job, 'candidate_id': identity, 'keyword_score': score}
     return sorted(unique.values(), key=lambda item: (-item['keyword_score'], item['candidate_id']))[:12]
+
+
+def catalog(store, query='', location='', mode='any', limit=30):
+    jobs, coverage, errors = [], [], []
+    for source in source_registry():
+        try:
+            found = cached_feed(store, source)
+            jobs.extend(found)
+            coverage.append({'source': source, 'count': len(found), 'status': 'available'})
+        except ValueError as error:
+            errors.append(str(error))
+            coverage.append({'source': source, 'count': 0, 'status': 'unavailable'})
+    result = []
+    seen = set()
+    words = query.casefold().split()
+    for job in jobs:
+        identity = job_identity(job)
+        if identity in seen or not location_matches(location, job['location']):
+            continue
+        if mode != 'any' and job_mode(job) != mode:
+            continue
+        text = (job['role'] + ' ' + job['company'] + ' ' + job['description']).casefold()
+        if any(word not in text for word in words):
+            continue
+        seen.add(identity)
+        result.append({**job, 'candidate_id': identity})
+    result.sort(key=lambda job: (0 if all(word in job['role'].casefold() for word in words) else 1, job['company'], job['role']))
+    return {'jobs': result[:limit], 'total_matches': len(result), 'sources': coverage, 'errors': errors,
+            'limited': len(result) > limit, 'model_calls': 0}
 
 
 def _process_batch(store, batch_id):
@@ -212,13 +263,14 @@ def _process_batch(store, batch_id):
             if 'candidates' not in progress:
                 jobs = []
                 errors = []
-                for source in ('remotive', 'arbeitnow'):
+                for source in source_registry():
                     try:
                         jobs.extend(cached_feed(store, source))
                     except ValueError as error:
                         errors.append(str(error))
                 if not jobs and errors:
                     raise HTTPException(503, 'Job sources are unavailable. The batch is saved and can be retried later.')
+                progress['sources'] = list(source_registry())
                 progress['source_errors'] = errors
                 progress['candidates'] = shortlist(jobs, progress['plan'], profile.get('preferences', {}))
                 progress['events'].append(f'Inspected {len(jobs)} source listings; shortlisted {len(progress["candidates"])} unique roles.')
@@ -238,6 +290,7 @@ def _process_batch(store, batch_id):
                         size = 0
                         for job in pending:
                             compact = {key: job[key] for key in ('candidate_id', 'company', 'role', 'location', 'remote')}
+                            compact['workplace'] = job_mode(job)
                             compact['description'] = job['description'][:6000]
                             length = len(json.dumps(compact, ensure_ascii=False))
                             if group and (len(group) >= 3 or size + length > 12000):
@@ -293,6 +346,8 @@ def _process_batch(store, batch_id):
                     save_progress(store, batch_id, progress)
                 attempted += 1
                 description = f"{job['description']}\n\nSource: {job['source']}\nRequired location: {job['location']}\nRemote: {job['remote']}"
+                if 'workplace' in job:
+                    description += '\nWork arrangement: ' + job_mode(job)
                 workspace = store.create(WorkspaceInput(resume_id=batch['resume_id'], company=job['company'], role=job['role'],
                     description=description, url=job['url'], request_id=workspace_key), profile_snapshot_id=batch['snapshot_id'])
                 from reviews import save_match, ensure_reminder
@@ -364,6 +419,12 @@ def register(app, store_factory):
         batch_id = create_batch(store, data)
         background.add_task(process_batch, store, batch_id)
         return batch_detail(store, batch_id)
+
+    @app.get('/api/job-catalog')
+    def browse_jobs(q: str = Query(default='', max_length=200), location: str = Query(default='', max_length=200),
+                    workplace: str = Query(default='any', pattern='^(any|remote|hybrid|onsite|unknown)$'),
+                    limit: int = Query(default=30, ge=1, le=100)):
+        return catalog(store_factory(), q, location, workplace, limit)
 
     @app.get('/api/discovery/review-queue')
     def review_queue():

@@ -13,12 +13,11 @@
 
 Restart the backend after updating. The backend needs to stay running while a
 batch executes. Leaving the frontend does not stop it. Closing the backend stops
-execution; use **Resume saved batch** to recover. This milestone does not install
-or activate a recurring schedule, send email, or submit applications.
+execution; use **Resume saved batch** to recover. Recurring schedules can now be configured explicitly; see [scheduled discovery](scheduled-discovery.md). No schedule is enabled by default. Email and submission remain manual.
 
 ## Sources and scope
 
-The current integrations read public job feeds, not arbitrary employer sites:
+The integrations read supported public feeds and selected employer boards, not arbitrary employer sites. See [broader coverage and model-free browsing](broader-job-coverage.md) for the Greenhouse/Ashby additions.
 
 - [Remotive API](https://github.com/remotive-com/remote-jobs-api): remote roles,
   including candidate location restrictions. Public data is delayed by 24 hours.
@@ -29,7 +28,7 @@ The current integrations read public job feeds, not arbitrary employer sites:
   listings, including remote and nonremote jobs. The first feed page is read;
   this implementation does not enumerate every page or cover every country.
 
-Only fixed HTTPS feed URLs are fetched. Requests have timeouts and response-size
+Only supported HTTPS feeds and validated employer-board URL patterns are fetched. Requests have timeouts and response-size
 limits; HTML becomes plain text and is never executed. No resume or profile data
 is sent to job boards. Profile facts, preferences, listings, and generated drafts
 are sent to the configured Groq model for planning, matching, writing, and review.
@@ -103,7 +102,7 @@ backend/.venv/bin/python backend/run_discovery.py \
   --request-id UNIQUE_SCHEDULE_SLOT
 ```
 
-No schedule is active. A future scheduler must provide dates in the user's chosen
+No schedule is activated automatically. The new [schedule settings](scheduled-discovery.md) provide local recurring execution. An external scheduler must provide dates in the user's chosen
 timezone, keep the backend worker environment available, and resume interrupted
 batches. These commands use the configured model and sources, so they have the
 same inference costs and data transfers as clicking Find Opportunities.

@@ -65,3 +65,6 @@
 .career-cooldown [role='timer'] { font-variant-numeric: tabular-nums; font-size: 1.4rem; color: var(--accent); }
 .career-cooldown p:last-child { margin-bottom: 0; }
 .review-draft-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; max-height: 500px; overflow: auto; }
+
+.schedule-days { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 18px 0; display: flex; flex-wrap: wrap; gap: 16px; }
+.schedule-days label { display: inline-flex; gap: 8px; align-items: center; }

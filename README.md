@@ -405,3 +405,17 @@ Opportunities**, to review match reasoning, gaps, unanswered questions, and draf
 materials. Edit drafts as new versions and follow the original application link.
 Automatic reminders use configurable delay/timezone preferences and do not
 reappear merely because a run is retried. See [review queue usage and behavior](documentation/application-review-queue.md).
+
+## Broader job sources without model quota
+
+**Find Opportunities → Browse jobs — no AI** searches public listings from selected
+Greenhouse/Ashby employers alongside Remotive and Arbeitnow. Filter by location and
+work arrangement, inspect the source, and save jobs for later without Groq calls.
+See [coverage, configuration, and limitations](documentation/broader-job-coverage.md).
+
+## Scheduled discovery
+
+In **Find Opportunities → Scheduled discovery**, configure weekdays, time,
+timezone, profile, and batch size. Schedules start paused until you explicitly
+enable one. The local backend must remain running; Groq cooldown retries stay
+manual. See [scheduled discovery setup and behavior](documentation/scheduled-discovery.md).
