@@ -21,7 +21,7 @@ Each execution starts fresh discovery with the latest confirmed profile for the
 selected resume and the saved review reminder preferences. It uses the configured
 public sources and existing matching/drafting/review flow. AI discovery needs
 available Groq quota. Model-free browsing remains separate and manually triggered.
-No email notifications or automatic application submission are enabled.
+Email digests are a separate opt-in feature; see [email setup](email-digest.md). No automatic application submission is enabled.
 
 ## Local execution and missed runs
 

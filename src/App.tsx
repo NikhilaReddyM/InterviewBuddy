@@ -12,6 +12,7 @@ import { downloadText } from './storage/files'
 import { Dashboard } from './features/dashboard/Dashboard'
 import { SystemDesignLab } from './features/design-lab/SystemDesignLab'
 import { ResourceLibrary } from './features/resources/ResourceLibrary'
+import { workspaceFromSearch } from './utils/workspaceLink'
 import { Opportunities } from './features/opportunities/Opportunities'
 import { ApplicationWorkspaces } from './features/workspaces/ApplicationWorkspaces'
 import { CareerProfile } from './features/career-profile/CareerProfile'
@@ -31,11 +32,11 @@ const sections = [
 
 function App() {
   const { data, error, blocked, rawRecovery, reload, dispatch } = useAppData()
-  const [navigation, setNavigation] = useState<Screen[]>([data.preferences.defaultLandingScreen])
+  const [navigation, setNavigation] = useState<Screen[]>(() => [workspaceFromSearch(window.location.search) ? 'workspaces' : data.preferences.defaultLandingScreen])
   const screen = navigation[navigation.length - 1]
   const previousScreen = navigation.length > 1 ? navigation[navigation.length - 2] : undefined
   const previousLabel = sections.find((item) => item.id === previousScreen)?.label
-  const [targetWorkspace, setTargetWorkspace] = useState<string | undefined>(undefined)
+  const [targetWorkspace, setTargetWorkspace] = useState<string | undefined>(() => workspaceFromSearch(window.location.search))
   const [storageInfo, setStorageInfo] = useState(false)
   const [notice, setNotice] = useState('')
   const heading = useRef<HTMLHeadingElement>(null)

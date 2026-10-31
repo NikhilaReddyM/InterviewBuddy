@@ -419,3 +419,11 @@ In **Find Opportunities → Scheduled discovery**, configure weekdays, time,
 timezone, profile, and batch size. Schedules start paused until you explicitly
 enable one. The local backend must remain running; Groq cooldown retries stay
 manual. See [scheduled discovery setup and behavior](documentation/scheduled-discovery.md).
+
+## Email review digest
+
+**Find Opportunities → Email review digest** previews pending application reviews
+and can send them through your configured SMTP account, manually or at selected
+calendar times. Email is disabled until explicitly enabled; no account or recipient
+is chosen automatically. Configure SMTP in `backend/.env`, restart, then use the UI.
+See [setup, content, duplicate protection, and delivery limitations](documentation/email-digest.md).

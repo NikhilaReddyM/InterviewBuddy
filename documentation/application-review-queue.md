@@ -57,7 +57,7 @@ reminder keys are reused for compatibility. Manual reminders remain independent.
 Preferences, match context, edit lineage, and reminder fingerprints are local SQLite
 tables in `applications.sqlite3`, separate from browser backups. Profile snapshots,
 job descriptions, existing drafts, and manual tracker records are preserved.
-No Groq retry worker, recurring search schedule, or email delivery is enabled.
+Groq retries remain manual. Recurring discovery and [email digests](email-digest.md) are separate opt-in settings; neither is enabled by default.
 
 ## API
 
