@@ -143,6 +143,12 @@ def extract_with_references(client, source):
 
 
 def generate_profile(source):
+    from model_provider import provider, ollama_model
+    if len(source) > 60000:
+        raise HTTPException(422, 'Resume text is too long for profile generation (60,000 character limit).')
+    if provider() == 'ollama':
+        with tracing_context(enabled=False):
+            return extract_with_references(ollama_model(ReferencedProfile, 8192), source)
     from qa import configuration, SUPPORTED_MODELS
     from langchain_groq import ChatGroq
     key, model = configuration()

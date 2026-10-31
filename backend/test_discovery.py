@@ -68,6 +68,59 @@ class DiscoveryTests(unittest.TestCase):
         self.assertFalse(run['paused'])
         self.assertTrue(run['state']['context']['autonomous'])
 
+    def test_score_threshold_is_inclusive_and_drafting_does_not_reassess_fit(self):
+        for score in (69, 70, 100):
+            with self.subTest(score=score):
+                batch_id = create_batch(self.store, self.input.model_copy(update={'request_id': f'score-{score}'}))
+                job = {**JOB, 'role': f'Python Engineer {score}', 'source_id': str(score), 'url': JOB['url'] + f'-{score}'}
+                roles = []
+                def model(role, context):
+                    roles.append(role)
+                    if role == 'coordinator':
+                        raise AssertionError('Drafting must not reassess the role')
+                    result = self.model(role, context)
+                    if role == 'job_matcher':
+                        for match in result['matches']:
+                            match.update(score=score, eligible=False)  # Score is the final gate.
+                    return result
+                with patch('discovery.cached_feed', side_effect=lambda store, source: [job] if source == 'remotive' else []), patch('application_agents.call_agent', side_effect=model):
+                    process_batch(self.store, batch_id)
+                result = batch_detail(self.store, batch_id)
+                self.assertEqual(result['status'], 'completed')
+                self.assertNotIn('coordinator', roles)
+                if score < 70:
+                    self.assertEqual(result['progress']['items'], [])
+                    self.assertNotIn('writer', roles)
+                else:
+                    item = result['progress']['items'][0]
+                    self.assertEqual(item['status'], 'ready_for_review')
+                    self.assertIn('writer', roles)
+                    self.assertIn('reviewer', roles)
+
+    def test_previously_rejected_match_can_redraft_in_same_workspace(self):
+        self.run_batch()
+        previous = batch_detail(self.store, self.batch_id)
+        item = previous['progress']['items'][0]
+        workspace_id = item['workspace_id']
+        # Simulate a completed run from the earlier rejection policy.
+        item['status'] = 'role_not_recommended'
+        with self.store.connect() as db:
+            db.execute('UPDATE discovery_batches SET payload=? WHERE id=?', (json.dumps(previous['progress']), self.batch_id))
+        self.assertTrue(batch_detail(self.store, self.batch_id)['can_redraft_rejected'])
+        with patch('discovery.cached_feed') as feed, patch('application_agents.call_agent', side_effect=self.model) as model:
+            process_batch(self.store, self.batch_id)
+            feed.assert_not_called()
+            self.assertNotIn('job_matcher', [call.args[0] for call in model.call_args_list])
+        current = batch_detail(self.store, self.batch_id)
+        self.assertFalse(current['can_redraft_rejected'])
+        self.assertEqual(current['progress']['items'][0]['workspace_id'], workspace_id)
+        self.assertEqual(current['progress']['items'][0]['status'], 'ready_for_review')
+        self.assertEqual(len(self.store.list()), 1)
+        count = len(self.store.detail(workspace_id)['drafts'])
+        self.run_batch()
+        self.assertEqual(len(self.store.detail(workspace_id)['drafts']), count)
+        self.assertEqual(len(self.store.detail(workspace_id)['reminders']), 1)
+
     def test_idempotent_batches_and_cross_batch_dedup(self):
         self.assertEqual(create_batch(self.store, self.input), self.batch_id)
         self.run_batch()
@@ -79,6 +132,50 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(len(self.store.detail(self.store.list()[0]['id'])['reminders']), 1)
         with self.assertRaises(HTTPException):
             create_batch(self.store, self.input.model_copy(update={'max_applications': 2}))
+
+    def test_long_resume_id_resumes_legacy_workspace_intent_without_rematching(self):
+        resume_id = 'r' * 64  # Real uploaded resumes use SHA-256 IDs.
+        with closing(sqlite3.connect(self.root / 'resumes/resumes.sqlite3')) as db:
+            db.execute('UPDATE career_profiles SET resume_id=?', (resume_id,))
+            db.commit()
+        request = self.input.model_copy(update={'resume_id': resume_id, 'request_id': 'long-resume'})
+        batch_id = create_batch(self.store, request)
+        with patch.object(self.store, 'create', side_effect=RuntimeError('Interrupted before workspace creation')):
+            self.run_batch(batch_id)
+        failed = batch_detail(self.store, batch_id)
+        self.assertEqual(failed['status'], 'failed')
+        progress = failed['progress']
+        item = progress['items'][0]
+        # Reproduce the saved intent written by the old implementation.
+        legacy_key = f"discovery:{resume_id}:{item['candidate_id']}"
+        self.assertGreater(len(legacy_key), 100)
+        item['workspace_request_id'] = legacy_key
+        with self.store.connect() as db:
+            db.execute('UPDATE discovery_batches SET payload=? WHERE id=?', (json.dumps(progress), batch_id))
+        roles = []
+        def model(role, context):
+            roles.append(role)
+            return self.model(role, context)
+        with patch('application_agents.call_agent', side_effect=model), patch('discovery.cached_feed') as feed:
+            process_batch(self.store, batch_id)
+            feed.assert_not_called()
+        result = batch_detail(self.store, batch_id)
+        self.assertEqual(result['status'], 'completed')
+        self.assertNotIn('search_planner', roles)
+        self.assertNotIn('job_matcher', roles)
+        self.assertEqual(result['progress']['items'][0]['status'], 'ready_for_review')
+        workspace = self.store.list()[0]
+        detail = self.store.detail(workspace['id'])
+        self.assertEqual(len(detail['drafts']), 3)
+        self.assertEqual(len(detail['reminders']), 1)
+        self.assertLessEqual(len(result['progress']['items'][0]['workspace_request_id']), 100)
+        # New batches still recognize the same job; replaying this run adds nothing.
+        self.run_batch(batch_id)
+        second = create_batch(self.store, request.model_copy(update={'request_id': 'long-resume-second'}))
+        self.run_batch(second)
+        self.assertEqual(batch_detail(self.store, second)['progress']['items'][0]['status'], 'duplicate')
+        self.assertEqual(len(self.store.list()), 1)
+        self.assertEqual(len(self.store.detail(workspace['id'])['drafts']), 3)
 
     def test_batch_uses_original_profile_even_after_edit(self):
         with closing(sqlite3.connect(self.root / 'resumes/resumes.sqlite3')) as db:

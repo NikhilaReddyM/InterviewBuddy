@@ -76,3 +76,12 @@ it('shows a manual cooldown without making automatic retries', async () => {
   expect(screen.queryByText('Old rate limit')).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Find opportunities' })).toBeEnabled()
 })
+
+it('offers drafting previously rejected matches without a fresh search', async () => {
+  const batch = { id: 'old', status: 'completed', can_redraft_rejected: true, created_at: '2026-10-30T12:00:00Z', progress: { events: [], items: [] } }
+  const fetcher = vi.fn().mockResolvedValueOnce(response([batch])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response({ ...batch, status: 'queued' }))
+  vi.stubGlobal('fetch', fetcher)
+  render(<Opportunities onOpenWorkspace={vi.fn()} />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Draft matched jobs previously rejected' }))
+  expect(fetcher.mock.calls[3][0]).toBe('/api/discovery/old/retry')
+})

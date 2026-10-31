@@ -120,6 +120,15 @@ def build_agent_graph(saver, store, run_id):
         if writers >= 3 and (blocked or not reviewed):
             return {'decision': {'action': 'finish', 'reason': 'Revision limit reached; unresolved findings need your review.', 'questions': []},
                     'phase': 'needs_review', 'events': event(state, 'Coordinator stopped at the revision limit with unresolved findings.')}
+        # Discovery already made the suitability decision. Coordinate artifact quality
+        # deterministically; missing facts never trigger another role assessment.
+        if state['context'].get('discovery_managed'):
+            action = 'write' if not reviewed else 'revise' if blocked else 'finish'
+            reason = ('The saved match meets the drafting threshold. Prepare supported drafts and flag unknown facts.'
+                      if not reviewed else 'Revise unsupported claims identified by the reviewer.' if blocked
+                      else 'Draft review is complete; unresolved questions remain for human review.')
+            return {'decision': {'action': action, 'reason': reason, 'questions': []},
+                    'phase': 'coordinating', 'events': event(state, 'Coordinator: ' + action + ' — ' + reason)}
         allowed = ['reject']
         if clarifications < 2 and not state['context'].get('autonomous', False):
             allowed.append('clarify')
@@ -166,14 +175,33 @@ def build_agent_graph(saver, store, run_id):
             raise HTTPException(502, 'Resume suggestions need supporting facts. Retry this step.')
         requested = set(current['screening_questions'])
         produced = [answer['question'] for answer in package['screening_answers']]
-        if len(produced) != len(set(produced)) or set(produced) != requested:
+        repaired_screening = False
+        if state['context'].get('discovery_managed'):
+            # Screening questions are authoritative input, not model-created fields.
+            # Do not block an otherwise useful draft for missing/extra questions;
+            # preserve only unambiguous answers to the supplied question text.
+            normalize = lambda value: ' '.join(value.split())
+            grouped = {}
+            for answer in package['screening_answers']:
+                grouped.setdefault(normalize(answer['question']), []).append(answer)
+            answers = []
+            for question in current['screening_questions']:
+                candidates = grouped.get(normalize(question), [])
+                if len(candidates) == 1:
+                    answers.append({**candidates[0], 'question': question})
+                else:
+                    answers.append({'question': question, 'answer': None, 'source_ids': []})
+            repaired_screening = answers != package['screening_answers']
+            package['screening_answers'] = answers
+        elif len(produced) != len(set(produced)) or set(produced) != requested:
             raise HTTPException(502, 'The writer omitted or invented screening questions. Retry this step.')
         for answer in package['screening_answers']:
             check_ids(answer['source_ids'], current['facts'])
             if answer['answer'] is not None and (not answer['answer'].strip() or not answer['source_ids']):
                 raise HTTPException(502, 'Screening answers need supporting facts; unknown answers must remain unanswered.')
         return {'package': package, 'writer_count': state.get('writer_count', 0) + 1, 'review': {},
-                'phase': 'drafted', 'events': event(state, 'Writer prepared application materials with source references.')}
+                'phase': 'drafted', 'events': event(state, 'Writer prepared application materials with source references.' +
+                    (' Screening answers were aligned to supplied questions; missing or duplicate answers were left blank for your review.' if repaired_screening else ''))}
 
     def persist_drafts(state):
         package = state['package']

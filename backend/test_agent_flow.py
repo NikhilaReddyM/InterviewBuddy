@@ -71,6 +71,15 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(len(self.store.detail(self.workspace['id'])['drafts']), 9)
         self.assertEqual(len(self.store.detail(self.workspace['id'])['findings']), 3)
 
+    def test_discovery_drafts_revise_unsupported_claims_without_rejecting_role(self):
+        self.start = AgentStart(request_id='discovery:matched-job', autonomous=True)
+        blocking = {'findings': [{'artifact': 'cover_letter', 'severity': 'blocking', 'message': 'Unsupported claim'}], 'summary': 'Revise'}
+        with patch('application_agents.call_agent', side_effect=[ANALYSIS, PACKAGE, blocking, PACKAGE, blocking, PACKAGE, blocking]) as call:
+            result = start_agents(self.store, self.workspace['id'], self.start)
+        self.assertEqual(result['state']['phase'], 'needs_review')
+        self.assertNotIn('coordinator', [c.args[0] for c in call.call_args_list])
+        self.assertEqual(len(self.store.detail(self.workspace['id'])['drafts']), 9)
+
     def test_reject_has_no_application_drafts(self):
         result = self.run_agents([ANALYSIS, decision('reject')])
         self.assertEqual(result['state']['phase'], 'role_not_recommended')
@@ -132,6 +141,39 @@ class AgentFlowTests(unittest.TestCase):
                 resumed = client.post(path + f'/agent-runs/{run["id"]}/resume', json={'checkpoint_id': run['checkpoint_id'], 'answers': ['Yes']})
             self.assertEqual(resumed.json()['state']['phase'], 'ready_for_review')
             self.assertEqual(client.get(path + f'/runs/{run["id"]}').json()['workflow'], 'application_v1')
+
+    def test_discovery_drops_invented_questions_and_fills_missing_answers(self):
+        self.start = AgentStart(request_id='discovery:screening', autonomous=True,
+                                screening_questions=['Can you relocate?'])
+        package = {**PACKAGE, 'screening_answers': [{'question': 'Invented question?', 'answer': 'Invented', 'source_ids': ['invented-id']}]}
+        with patch('application_agents.call_agent', side_effect=[ANALYSIS, package, REVIEW]):
+            result = start_agents(self.store, self.workspace['id'], self.start)
+        self.assertEqual(result['state']['phase'], 'ready_for_review')
+        self.assertEqual(result['state']['package']['screening_answers'], [
+            {'question': 'Can you relocate?', 'answer': None, 'source_ids': []}])
+        self.assertTrue(any('aligned to supplied questions' in event for event in result['state']['events']))
+
+    def test_discovery_never_persists_invented_screening_when_none_requested(self):
+        self.start = AgentStart(request_id='discovery:no-screening', autonomous=True)
+        package = {**PACKAGE, 'screening_answers': [{'question': 'Invented?', 'answer': 'Yes', 'source_ids': []}]}
+        with patch('application_agents.call_agent', side_effect=[ANALYSIS, package, REVIEW]):
+            result = start_agents(self.store, self.workspace['id'], self.start)
+        self.assertEqual(result['state']['phase'], 'ready_for_review')
+        self.assertEqual(result['state']['package']['screening_answers'], [])
+
+    def test_discovery_preserves_supported_answers_and_leaves_duplicates_blank(self):
+        self.start = AgentStart(request_id='discovery:duplicates', autonomous=True,
+                                screening_questions=['Python experience?', 'Can you relocate?'])
+        package = {**PACKAGE, 'screening_answers': [
+            {'question': '  Python   experience? ', 'answer': 'Built Python services.', 'source_ids': ['fact-1']},
+            {'question': 'Can you relocate?', 'answer': 'Yes', 'source_ids': []},
+            {'question': 'Can you relocate?', 'answer': 'No', 'source_ids': []}]}
+        with patch('application_agents.call_agent', side_effect=[ANALYSIS, package, REVIEW]):
+            result = start_agents(self.store, self.workspace['id'], self.start)
+        self.assertEqual(result['state']['phase'], 'ready_for_review')
+        self.assertEqual(result['state']['package']['screening_answers'], [
+            {'question': 'Python experience?', 'answer': 'Built Python services.', 'source_ids': ['fact-1']},
+            {'question': 'Can you relocate?', 'answer': None, 'source_ids': []}])
 
     def test_job_screening_questions_are_extracted_and_unknowns_preserved(self):
         with self.store.connect() as db:

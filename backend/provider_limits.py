@@ -48,7 +48,7 @@ class ProviderGuard:
 
     @staticmethod
     def pause(seconds):
-        raise HTTPException(429, 'Groq is temporarily throttling requests. Progress is saved; resume manually after the cooldown.',
+        raise HTTPException(429, 'The model provider is temporarily throttling requests. Progress is saved; resume manually after the cooldown.',
                             headers={'Retry-After': str(seconds)})
 
 

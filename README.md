@@ -427,3 +427,7 @@ and can send them through your configured SMTP account, manually or at selected
 calendar times. Email is disabled until explicitly enabled; no account or recipient
 is chosen automatically. Configure SMTP in `backend/.env`, restart, then use the UI.
 See [setup, content, duplicate protection, and delivery limitations](documentation/email-digest.md).
+
+### Local Ollama models
+
+Career profiles, application agents, discovery, and PDF Q&A can use local Qwen instead of Groq. Set `LLM_PROVIDER=ollama` and `OLLAMA_MODEL=qwen3:8b` in `backend/.env`, keep Ollama running, and restart the backend. See [provider setup and recovery](documentation/model-providers.md). Groq remains the default; providers never switch automatically.

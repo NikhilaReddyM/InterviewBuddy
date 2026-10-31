@@ -42,7 +42,8 @@ A Search Planner chooses up to six role/skill keywords from the confirmed profil
 and preferences. Local keyword and work-arrangement filtering shortlists at most
 12 unique jobs from the source pool. The Matcher evaluates profile fit, exclusions,
 location restrictions, and uncertainty, linking matches to confirmed fact IDs.
-Eligible matches scoring at least 65/100 are considered in score order. Scores
+Matches scoring at least 70/100 are considered in score order. The score is the
+final drafting gate; the model’s separate eligible flag does not veto a score of 70 or higher. Scores
 are model judgments, not probabilities or proof of eligibility. Skipped match
 reasons are available in discovery history.
 
@@ -53,17 +54,18 @@ for the same resume do not generate another workspace for that identity. Manual
 workspaces are not deduplicated against discovery records.
 
 Each selected role uses the existing Analyst/Coordinator/Writer/Reviewer graph in
-`autonomous` mode. Clarification is removed from allowed actions. If the model
-still asks for it, the backend continues drafting/review instead. Unknown facts
-remain unanswered and are surfaced in analysis, screening answers, or reviewer
-findings. Explicit incompatibilities can cause rejection. Three Writer passes
-remain the upper bound. Automated review does not guarantee factual correctness.
+`autonomous` mode. Once selected, the Coordinator routes deterministically to
+writing, revision for blocking review findings, or completion. It makes no second
+model call to reassess suitability and cannot reject the role or request clarification.
+Unknown facts remain unanswered and are surfaced in analysis, screening answers,
+or reviewer findings. Three Writer passes remain the upper bound; unresolved
+blocking findings produce `needs_review`, with drafts retained. Automated review does not guarantee factual correctness.
 Human review remains required before submission.
 
 Drafts, reviews, and final reminders are saved in SQLite. An incomplete run with
 saved drafts gets a reminder clearly labeled incomplete. If there are no drafts,
-its failure remains visible in discovery history. A rejected role gets no draft
-review reminder. Review reminders appear in **Find Opportunities** and their
+its failure remains visible in discovery history. Below-threshold jobs get no
+draft review reminder. Review reminders appear in **Find Opportunities** and their
 workspace, independently of the older browser-based manual tracker.
 
 ## Durability and later scheduling
@@ -181,3 +183,19 @@ anchors the countdown; the backend also rejects early manual resumption. A
 recorded retry window is not a guarantee that every organization quota has reset.
 Older failures without a recorded delay cannot show an exact reset time; no
 artificial countdown is inferred from the error text.
+
+## Recover earlier drafting-stage rejections
+
+After restarting the backend, older batches containing rejected jobs scored at
+least 70 show **Draft matched jobs previously rejected**. This explicit action
+reuses saved matching, profile snapshots, and existing workspaces. It starts a
+stable replacement agent run while keeping the previous rejection as history.
+Repeating or resuming that action does not create duplicate workspaces, drafts,
+or reminders. Already prepared applications are left alone. The configured
+application limit per batch continues to apply.
+
+For discovery-managed drafting, the supplied screening-question list is authoritative.
+Unexpected generated questions are discarded, whitespace differences are resolved
+to the supplied wording, and missing or duplicate answers are saved as unanswered
+for human review. Supported answers are retained. This does not relax source-ID
+or factual-claim validation. The run activity records when alignment was needed.

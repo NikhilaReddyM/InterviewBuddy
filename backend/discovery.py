@@ -15,7 +15,11 @@ import application_agents as agents
 from agent_flow import AgentStart, start_agents, drive
 from application_runs import locked_graph, describe, run_row
 from job_sources import cached_feed, source_registry
+from model_provider import provider, saved_cooldown, metadata
 from workspaces import Store, StrictModel, WorkspaceInput, ReminderInput, now
+
+
+DRAFT_MATCH_THRESHOLD = 70
 
 
 class DiscoveryInput(StrictModel):
@@ -78,11 +82,12 @@ def batch_detail(store, batch_id):
         snapshot = db.execute('SELECT profile_revision,payload FROM profile_snapshots WHERE id=?', (result['snapshot_id'],)).fetchone()
         result['profile_revision'] = snapshot['profile_revision']
         result['profile_preferences'] = json.loads(snapshot['payload']).get('preferences', {})
+        result['can_redraft_rejected'] = any(item.get('status') == 'role_not_recommended' and item.get('match', {}).get('score', 0) >= DRAFT_MATCH_THRESHOLD for item in result['progress'].get('items', []))
         result['server_time'] = time.time()
-        result['cooldown_until'] = result['progress'].get('retry_at')
+        result['cooldown_until'] = saved_cooldown(result['progress'])
         if result['status'] in ('waiting', 'failed', 'partial'):
-            from qa import configuration
-            _, model = configuration()
+            from model_provider import cooldown_model
+            model = cooldown_model()
             try:
                 cooldown = db.execute('SELECT retry_at FROM provider_cooldowns WHERE model=?', (model,)).fetchone()
             except sqlite3.OperationalError:
@@ -235,19 +240,29 @@ def catalog(store, query='', location='', mode='any', limit=30):
             'limited': len(result) > limit, 'model_calls': 0}
 
 
+def bounded_request_id(value):
+    """Keep legacy keys when valid; hash long keys without losing their namespace."""
+    if len(value) <= 100:
+        return value
+    namespace = value.split(':', 1)[0]
+    return namespace + ':' + hashlib.sha256(value.encode()).hexdigest()
+
+
 def _process_batch(store, batch_id):
     """Callable by a future scheduler. Never asks for intermediate user input."""
     with worker_lock(store) as acquired:
         if not acquired:
             return  # Remains queued/resumable; no competing source/model requests.
         batch = batch_detail(store, batch_id)
-        if batch['status'] == 'completed':
+        if batch['status'] == 'completed' and not batch['can_redraft_rejected']:
             return
         progress = batch['progress']
-        if batch['status'] == 'waiting' and progress.get('retry_at', 0) > time.time():
+        if batch['status'] == 'waiting' and (saved_cooldown(progress) or 0) > time.time():
             return
         progress.pop('retry_at', None)
         progress.pop('error', None)
+        info = metadata()
+        progress.setdefault('events', []).append(f"Processing with {info['provider']} · {info['model']}.")
         save_progress(store, batch_id, progress, 'running')
         try:
             with store.connect() as db:
@@ -304,7 +319,7 @@ def _process_batch(store, batch_id):
                         if len(ids) != len(set(ids)) or set(ids) != {job['candidate_id'] for job in group}:
                             raise HTTPException(502, 'Job matcher returned incomplete or invalid candidate references for this group.')
                         if any(not match['reason'].strip() or any(fact not in facts for fact in match['relevant_fact_ids']) or
-                               (match['eligible'] and not match['relevant_fact_ids']) for match in received):
+                               (match['score'] >= DRAFT_MATCH_THRESHOLD and not match['relevant_fact_ids']) for match in received):
                             raise HTTPException(502, 'Job matcher did not provide valid profile evidence.')
                         matches.extend(received)
                         done.update(ids)
@@ -316,24 +331,31 @@ def _process_batch(store, batch_id):
                     progress['matches'] = []
                 progress['events'].append('Matcher evaluated profile fit, preferences, location restrictions, and gaps.')
                 save_progress(store, batch_id, progress)
-            selected = [match for match in progress['matches'] if match['eligible'] and match['score'] >= 65]
+            selected = [match for match in progress['matches'] if match['score'] >= DRAFT_MATCH_THRESHOLD]
             attempted = 0
             for match in selected:
                 if attempted >= batch['input']['max_applications']:
                     break
                 candidate_id = match['candidate_id']
                 item = next((item for item in progress['items'] if item['candidate_id'] == candidate_id), None)
-                if item and item.get('status') in ('ready_for_review', 'needs_review', 'role_not_recommended', 'duplicate'):
+                if item and item.get('status') in ('ready_for_review', 'needs_review', 'duplicate'):
                     if item['status'] != 'duplicate':
                         attempted += 1
                     continue
                 if item is None:
                     item = {'candidate_id': candidate_id, 'status': 'preparing', 'match': match}
                     progress['items'].append(item)
+                if item.get('status') == 'role_not_recommended':
+                    # Preserve the old run as history, but reuse its workspace. Persist
+                    # a stable replacement run key so retries cannot duplicate drafts.
+                    item['draft_request_id'] = bounded_request_id(f'discovery:{batch_id}:{candidate_id}:match70')
+                    item['status'] = 'preparing'
+                    item.pop('outcome_reason', None)
                 job = next(job for job in progress['candidates'] if job['candidate_id'] == candidate_id)
                 workspace_key = f'discovery:{batch["resume_id"]}:{candidate_id}'
                 if progress.get('reassesses_batch_id'):
                     workspace_key = 'reassess:' + hashlib.sha256((workspace_key + ':' + batch['snapshot_id']).encode()).hexdigest()
+                workspace_key = bounded_request_id(workspace_key)
                 if not item.get('workspace_id'):
                     with store.connect() as db:
                         prior = db.execute('SELECT id FROM workspaces WHERE request_id=?', (workspace_key,)).fetchone()
@@ -357,7 +379,7 @@ def _process_batch(store, batch_id):
                 if parent_id:
                     store.link_reassessment(parent_id, workspace['id'])
                 save_progress(store, batch_id, progress)
-                run = start_agents(store, workspace['id'], AgentStart(request_id=f'discovery:{batch_id}:{candidate_id}', autonomous=True,
+                run = start_agents(store, workspace['id'], AgentStart(request_id=item.get('draft_request_id') or bounded_request_id(f'discovery:{batch_id}:{candidate_id}'), autonomous=True,
                     instructions='Complete independently. Do not ask questions. Leave unknown answers blank and flag them for final review. Match cautions: ' + '; '.join(match['cautions'])[:4000]))
                 # Recover a previously interrupted/failed step once, bounded per batch attempt.
                 if run.get('error') and run.get('error_status') not in (429, 413) and run['next'] and not run['paused']:
@@ -392,7 +414,8 @@ def _process_batch(store, batch_id):
                 from provider_limits import retry_seconds
                 seconds = retry_seconds(error.headers or {})
                 progress['retry_at'] = time.time() + seconds
-                progress['events'].append('Paused for Groq cooldown. Automatic retries are off; click Resume saved batch after the countdown ends.')
+                progress['retry_provider'] = provider()
+                progress['events'].append('Paused for model provider cooldown. Automatic retries are off; click Resume saved batch after the countdown ends.')
                 save_progress(store, batch_id, progress, 'waiting')
                 return
             save_progress(store, batch_id, progress, 'failed')
@@ -462,7 +485,7 @@ def register(app, store_factory):
         batch = batch_detail(store, batch_id)
         if (batch.get('cooldown_until') or 0) > time.time():
             return batch
-        if batch['status'] == 'completed' or batch['is_running']:
+        if (batch['status'] == 'completed' and not batch['can_redraft_rejected']) or batch['is_running']:
             return batch
         with worker_lock(store) as available:
             if not available:

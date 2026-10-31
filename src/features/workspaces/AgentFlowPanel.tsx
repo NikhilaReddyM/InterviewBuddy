@@ -69,7 +69,7 @@ export function AgentFlowPanel({ workspaceId, runs, onSaved }: { workspaceId: st
   return <section className="agent-panel" aria-busy={busy}>
     <div className="career-section-heading"><div><p className="eyebrow">APPLICATION COPILOT</p><h3>Prepare an application with your agents</h3></div><Sparkles size={24} aria-hidden="true" /></div>
     <p>Analyze this role, prepare application materials, and check claims against the profile saved with this workspace. The coordinator works independently, flags missing facts for your final review, revises drafts, or recommends skipping the role.</p>
-    <p className="subtle">Starting sends the job description, profile facts, preferences, and your instructions to your configured Groq model. Answers you provide are used in this run; your Career Profile stays unchanged. Nothing is submitted.</p>
+    <p className="subtle">Starting sends the job description, profile facts, preferences, and your instructions to your configured model provider. Answers you provide are used in this run; your Career Profile stays unchanged. Nothing is submitted.</p>
     <details className="career-details" open={!run}><summary>Start a new agent run</summary><form onSubmit={event => { event.preventDefault(); void action(async () => {
       const result = await request<Run>(`${base}/agent-runs`, { request_id: requestId, instructions, autonomous: true, screening_questions: screening.split('\n').map(value => value.trim()).filter(Boolean) })
       setInstructions(''); setScreening(''); setRequestId(crypto.randomUUID()); return result

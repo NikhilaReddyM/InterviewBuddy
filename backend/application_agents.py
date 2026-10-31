@@ -90,7 +90,8 @@ PROMPTS = {
     'writer': 'Prepare a concise tailored cover letter, suggested resume bullets, and answers ONLY to the supplied '
               'screening questions. Every factual candidate claim must reference supporting source_ids. '
               'Resume suggestions require evidence IDs. Generic greetings and expressions of interest may have no IDs. '
-              'Unknown screening answers must be null with no IDs. Do not invent screening questions. '
+              'Unknown screening answers must be null with no IDs. Copy each supplied screening question exactly once. '
+              'When screening_questions is empty, return screening_answers as an empty list. Never invent screening questions. '
               'Address all reviewer findings when revising; preserve actual career facts.',
     'reviewer': 'Independently check every draft claim against the referenced candidate facts and confirmed answers. '
                 'Check semantic support, metrics, dates, identity, and unsupported qualifications. Verify relevance '
@@ -149,6 +150,18 @@ def compact_context(role, context):
 
 
 def call_agent(role, context):
+    from model_provider import provider, ollama_model, cooldown_model
+    if provider() == 'ollama':
+        from provider_limits import GUARD
+        from langsmith import tracing_context
+        guard = GUARD.get()
+        if guard:
+            guard.before_call(cooldown_model())
+        with tracing_context(enabled=False):
+            result = ollama_model(SCHEMAS[role], OUTPUT_TOKENS[role]).invoke([
+                ('system', INSTRUCTIONS + '\n' + PROMPTS[role]),
+                ('human', json.dumps(compact_context(role, context), ensure_ascii=False))], config={'callbacks': []})
+        return SCHEMAS[role].model_validate(result).model_dump()
     from qa import configuration, SUPPORTED_MODELS
     from langchain_groq import ChatGroq
     from langsmith import tracing_context

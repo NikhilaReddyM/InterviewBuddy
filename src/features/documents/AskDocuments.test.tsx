@@ -38,7 +38,7 @@ it('prevents requests without a configured model and key',async()=>{
  fireEvent.click(screen.getByRole('button',{name:'Ask my PDFs'}))
  await screen.findByText('Q&A setup')
  expect(screen.getByText('Ask with citations')).toBeDisabled()
- expect(screen.getByText(/Add your Groq API key/)).toBeInTheDocument()
+ expect(screen.getByText(/add your Groq API key/)).toBeInTheDocument()
 })
 it('shows validation failures without rendering an answer',async()=>{
  vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(Response.json(config)).mockResolvedValueOnce(Response.json({detail:'The model response failed citation validation.'},{status:502})))

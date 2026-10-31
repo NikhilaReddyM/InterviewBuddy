@@ -26,6 +26,9 @@ def configuration():
 
 
 def structured_model():
+    from model_provider import provider, ollama_model
+    if provider() == 'ollama':
+        return ollama_model(AnswerDraft, 4096)
     key, model_id = configuration()
     if not key or model_id not in SUPPORTED_MODELS:
         raise HTTPException(503, 'Configure GROQ_API_KEY and a supported GROQ_MODEL in backend/.env, then restart the backend.')
@@ -55,23 +58,23 @@ def register(app, connect, retrieve, search_type):
 
     @app.get('/api/qa/config')
     def settings():
-        key, model_id = configuration()
+        from model_provider import metadata
+        info = metadata()
         try:
             docs = corpus()
             corpus_error = None
         except HTTPException as error:
             docs, corpus_error = [], error.detail
-        return {'provider': 'Groq', 'model': model_id or None,
-                'configured': bool(key) and model_id in SUPPORTED_MODELS,
-                'supported_models': list(SUPPORTED_MODELS), 'documents': docs, 'corpus_error': corpus_error,
+        return {**info, 'documents': docs, 'corpus_error': corpus_error,
                 'retrieval': 'hybrid', 'include_unreviewed': True, 'tracing': False}
 
     @app.post('/api/qa/ask')
     def ask(request: Question):
         if not request.question.strip():
             raise HTTPException(422, 'Enter a question.')
-        key, model_id = configuration()
-        if not key or model_id not in SUPPORTED_MODELS:
+        from model_provider import metadata
+        info = metadata()
+        if not info['configured']:
             raise HTTPException(503, 'Set GROQ_API_KEY and GROQ_MODEL in backend/.env, then restart the backend. Never put your API key in the browser.')
         if not GENERATION_LOCK.acquire(blocking=False):
             raise HTTPException(409, 'An answer is already being generated. Wait for it to finish.')
@@ -82,7 +85,7 @@ def register(app, connect, retrieve, search_type):
                 query=request.question, method='hybrid', top_k=5, group_pages=False))
             model = structured_model() if retrieval['results'] else None
             result = answer_from_retrieval(request.question, retrieval, model)
-            return {**result, 'question': request.question, 'provider': 'Groq', 'model': model_id,
+            return {**result, 'question': request.question, 'provider': info['provider'], 'model': info['model'],
                     'retrieval_method': 'hybrid', 'elapsed_ms': round((perf_counter() - started) * 1000, 2),
                     'citation_validation': 'Source IDs and exact quotes checked; claim support still needs human review.',
                     'index_snapshots': retrieval.get('index_snapshots', [])}

@@ -49,12 +49,12 @@ export function AskDocuments({ onBusyChange }: { onBusyChange?: (busy: boolean) 
     <Button disabled={busy} aria-expanded={opened} onClick={() => setOpened(!opened)}><MessageSquare size={18} aria-hidden="true" />{opened ? 'Close Q&A' : 'Ask my PDFs'}</Button>
     {opened && <>
       <h3>Ask your Dynamic Programming notes</h3>
-      <p className="pdf-muted">Detailed explanations with PDF citations. Your question and selected text passages are sent to Groq.</p>
+      <p className="pdf-muted">Detailed explanations with PDF citations. Your question and selected text passages are processed by your configured model provider.</p>
       {loading && <p role="status">Checking Q&A setup…</p>}
       {error && <p className="pdf-error" role="alert">{error}</p>}
       {!loading && (!config?.configured || error) && <details className="pdf-qa-setup" open={!config?.configured}>
-        <summary>Q&A setup</summary><p>Add your Groq API key and model to <code>backend/.env</code>, then restart the backend. Keep the key out of the browser and Git.</p>
-        <p>See <code>documentation/cited-qa-phase5.md</code> for setup instructions.</p>
+        <summary>Q&A setup</summary><p>Configure Ollama locally or add your Groq API key and model to <code>backend/.env</code>, then restart the backend. Keep the key out of the browser and Git.</p>
+        <p>See <code>documentation/model-providers.md</code> for setup instructions.</p>
         <Button variant="secondary" disabled={busy} onClick={() => setRefresh(v => v + 1)}>Refresh Q&A setup</Button>
       </details>}
       {config?.corpus_error && <p className="pdf-error" role="alert">{config.corpus_error}</p>}

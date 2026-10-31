@@ -206,8 +206,8 @@ def tick(store, current_time=None, stop=None):
                         record_result(store, run_id, 'skipped', 'Another discovery batch was running. No model requests were made.')
                         continue
                 from provider_limits import ProviderGuard
-                from qa import configuration
-                _, model = configuration()
+                from model_provider import cooldown_model
+                model = cooldown_model()
                 ProviderGuard(store).before_call(model)
                 check_profile(store, config['resume_id'])
                 key = f'schedule:{row["id"]}:{slot}'
