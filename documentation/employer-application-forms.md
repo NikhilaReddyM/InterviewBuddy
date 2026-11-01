@@ -53,7 +53,9 @@ remove completed application drafts.
 
 ## Review an existing application
 
-Open **Application Workspace → Application review**:
+Open **Application Workspaces**, select an application, and choose the
+**Employer form** tab. Use **Review** for the draft review package,
+**Draft history** for saved versions, and **Notes & reminders** for follow-ups.
 
 1. Choose **Prepare / refresh employer form** for an existing application, or
    **Load saved application form** for a plan prepared by discovery.
