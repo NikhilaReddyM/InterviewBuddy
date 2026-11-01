@@ -24,17 +24,19 @@ following an injected instruction. A plausible but unsupported technology fails.
 Proposed aggregate target: at least 95% of cases pass. Record the unsupported
 concept and the relevant fact IDs or preference field in the review explanation.
 
-## Output compliance (future code checks plus human review)
+## Output compliance (mechanical code checks)
 
 Require the existing SearchPlan structure: a keyword list and string rationale.
 For this evaluation also require 1–6 nonblank, distinct terms and a nonblank
-rationale. Each keyword should be a short search phrase, not a sentence. Human
-review checks concision and personal identifiers; schema/count/blank/duplicate
-checks can be automated. Do not claim schema validity proves semantic quality.
+rationale. The implemented score covers schema/count/blank/duplicate checks.
+Duplicates are normalized for Unicode, letter case, and whitespace. Each keyword
+should also be a short search phrase, not a sentence; reviewers should note
+concision concerns and check personal identifiers under grounding. Those require
+judgment and are not established by a mechanical compliance pass.
 
 Proposed aggregate target: 100% of cases pass.
 
-## Efficiency (future measured results)
+## Efficiency (recorded measurements)
 
 Record end-to-end planner latency, excluding dataset upload and evaluator time.
 Provisional p95 latency target: 10 seconds; confirm or replace it after a hardware

@@ -1,8 +1,9 @@
 # Search Planner evaluation — phase 1 pilot
 
 This folder contains five fictional pilot cases, reference criteria, and an isolated
-runner. Review status is recorded per case in `dataset.jsonl`. Evaluators and formal
-baseline/improved experiments are a later phase.
+runner, deterministic evaluators, and a human-review CSV workflow. Review status
+is recorded per case in `dataset.jsonl`. Formal baseline/improved experiments are
+a later phase.
 
 ## Agent boundary
 
@@ -108,7 +109,8 @@ Prompt/schema/token-limit content is fingerprinted as `prompt_version`; case
 metadata includes dataset version, review status, provider/model, and run name.
 Results include a dataset file hash, predicted output, error classification,
 elapsed seconds, available usage counts, and trace ID/URL. Unknown token usage is
-`null`, not zero. Correctness remains `null`/`not_scored` until evaluators are added.
+`null`, not zero. Overall correctness remains `null`; separate metric scores are
+stored under `evaluation`. Role alignment and grounding await human review.
 The model child is an explicit SDK trace around the existing structured call, with
 framework auto-tracing disabled to avoid duplicate runs.
 
@@ -123,3 +125,96 @@ Start with one case. In LangSmith verify its input/output, parent/child nesting,
 prompt version, model, latency and available token counts. Then omit `--case-id`
 to run all five. This runner emits traces; it does not yet upload a LangSmith
 dataset or create a scored evaluation experiment.
+
+## Evaluate and review (phase 3)
+
+New runner calls automatically evaluate **mechanical output compliance** and
+record latency and available input/output/total tokens. When `--trace` is enabled,
+these values are attached as feedback to the parent case trace. Role alignment
+and grounding are pending, not automatic passes or failures.
+
+Mechanical compliance requires strict SearchPlan schema, 1–6 nonblank keywords,
+no duplicates after Unicode/case/whitespace normalization, and a nonblank
+rationale. A generation error fails compliance. These checks do not prove relevance,
+grounding, concision, or absence of personal identifiers; human grounding review
+includes identifiers. See [rubric.md](rubric.md).
+
+For a predictable local result path, run:
+
+```sh
+backend/.venv/bin/python backend/evals/search_planner/run.py \
+  --trace --run-name pilot-scored --output backend/data/evals/pilot-scored.jsonl
+```
+
+The output file must not already exist. Export a review CSV from that file (or use
+the saved result path printed by an earlier run; no need to rerun the model):
+
+```sh
+backend/.venv/bin/python backend/evals/search_planner/review.py \
+  backend/data/evals/pilot-scored.jsonl \
+  --output backend/data/evals/pilot-review.csv
+```
+
+Open `backend/data/evals/pilot-review.csv` in Excel, Numbers, or Google Sheets.
+Each row is one actual agent response. Read `inputs`, `expected_criteria`, and
+`actual_output` together; use `trace_url` to inspect the same response in LangSmith.
+If `error` is non-null or the output is missing, record that failure rather than
+scoring the illustrative golden answer. Fill these columns:
+
+| Column | What to enter | Example for a supported backend response |
+| --- | --- | --- |
+| `role_alignment` | `1` for pass, `0` for fail; blank means pending | `1` |
+| `role_alignment_reason` | Explain the decision using the target role/preferences | `Targets backend engineering as requested.` |
+| `grounding` | `1` for pass, `0` for fail; blank means pending | `1` |
+| `grounding_reason` | Explain support or identify unsupported claims/identifiers | `Python and Django are confirmed skills in fact-2.` |
+| `reviewer` | Your name or a stable reviewer identifier | `Nikhila` |
+| `reviewed_at` | Your actual review time as an ISO timestamp with timezone | `2026-11-01T14:00:00-05:00` |
+
+These are formatting examples, not preassigned judgments. Score the output you
+actually received. For example, backend keywords plus an unsupported Kubernetes
+keyword could pass role alignment (`1`) but fail grounding (`0`), with the reason
+`Kubernetes is not supported by the supplied facts or preferences.` If you are
+unsure, leave the relevant score blank until you review it; do not enter `PASS`,
+`FAIL`, or `N/A`. Use the same reviewer identifier consistently and replace the
+example timestamp with the time you performed the review.
+
+Save as CSV and preserve `response_id` and `case_id`. Reviews bind to the exact
+saved response, not just the case ID. Editing display columns does not change
+the original evidence; change reference labels separately before a frozen run.
+Each assigned score requires a reason, reviewer, and timestamp. Partial review is
+allowed and pending counts remain visible.
+
+Apply labels locally and print a summary:
+
+```sh
+backend/.venv/bin/python backend/evals/search_planner/review.py \
+  backend/data/evals/pilot-scored.jsonl \
+  --reviews backend/data/evals/pilot-review.csv \
+  --output backend/data/evals/pilot-reviewed.jsonl
+```
+
+Add `--upload` to that command to attach code and human scores to the existing
+LangSmith traces:
+
+```sh
+backend/.venv/bin/python backend/evals/search_planner/review.py \
+  backend/data/evals/pilot-scored.jsonl \
+  --reviews backend/data/evals/pilot-review.csv \
+  --output backend/data/evals/pilot-reviewed.jsonl \
+  --upload
+```
+
+Choose either the local-only or upload command above for a fresh output path.
+Uploading requires the LangSmith key and trace IDs, makes no model
+calls, and saves local scored results before attempting uploads. Choose a new
+output path if you already applied the review. Repeated uploads add feedback
+entries; avoid uploading the same review repeatedly. In LangSmith inspect the
+parent case's Feedback/Scores for `output_compliance`, `role_alignment`, and
+`grounding`; unreviewed metrics are absent. These are trace feedback entries,
+not yet dataset evaluation experiments or Comparison-view experiments.
+
+Summary pass rates use the number of **scored** cases and report pending counts.
+Compliance includes generation failures. Latency uses nearest-rank p95 across
+measured calls, including failures; five cases give an unstable estimate. Mean
+total tokens includes only cases with known totals and reports missing coverage.
+There is no latency/token pass/fail until efficiency thresholds are frozen.

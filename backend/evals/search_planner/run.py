@@ -12,6 +12,7 @@ from uuid import uuid4
 
 BACKEND = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND))
+from evals.search_planner.evaluators import evaluate, summarize, upload_feedback
 
 
 def load_cases(path, selected=None):
@@ -42,7 +43,7 @@ def execute_case(row, info, prompt_version, run_name, project, client=None):
     meta.update(case_id=row['case_id'], prompt_version=prompt_version,
                 run_name=run_name, model=info['model'], provider=info['provider'],
                 expected_output=row['outputs'], correctness=None,
-                evaluation_status='not_scored')
+                evaluation_status='pending_human_review')
     result = {**meta, 'inputs': row['inputs'], 'output': None, 'error': None,
               'token_usage': None, 'trace_id': None, 'trace_url': None}
     usage = {}
@@ -68,11 +69,13 @@ def execute_case(row, info, prompt_version, run_name, project, client=None):
                 if child:
                     child.end(outputs={'output': result['output'], 'usage_metadata': usage or None},
                               error=result['error']['type'] if result['error'] else None)
+            result['evaluation'] = evaluate(result)
             if parent:
                 result['trace_id'] = str(parent.id)
                 result['trace_url'] = parent.get_url()
                 parent.end(outputs={'output': result['output'], 'latency_seconds': result['latency_seconds'],
-                                    'token_usage': result['token_usage'], 'error': result['error']},
+                                    'token_usage': result['token_usage'], 'error': result['error'],
+                                    'evaluation': result['evaluation']},
                            error=result['error']['type'] if result['error'] else None)
     return result
 
@@ -109,6 +112,7 @@ def main():
     output = args.output or BACKEND / 'data' / 'evals' / ('search-planner-' + str(uuid4()) + '.jsonl')
     output.parent.mkdir(parents=True, exist_ok=True)
     failed = False
+    results = []
     try:
         with output.open('x') as stream:
             for row in rows:
@@ -117,12 +121,20 @@ def main():
                 result['recorded_at'] = datetime.now(timezone.utc).isoformat()
                 stream.write(json.dumps(result) + '\n')
                 stream.flush()
+                results.append(result)
+                if client:
+                    try:
+                        upload_feedback(client, result, result['evaluation'])
+                    except Exception as error:
+                        failed = True
+                        print('Feedback upload failed:', type(error).__name__, 'Local result saved; inspect LangSmith before retrying.')
                 failed |= result['error'] is not None
                 print(row['case_id'], 'error' if result['error'] else 'completed', result['trace_url'] or '')
     finally:
         if client:
             client.flush()
     print('Results:', output)
+    print(json.dumps(summarize(results), indent=2))
     if failed:
         raise SystemExit(1)
 
