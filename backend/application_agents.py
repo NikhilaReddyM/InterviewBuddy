@@ -164,7 +164,7 @@ def compact_context(role, context):
     return result
 
 
-def call_agent(role, context):
+def call_agent(role, context, *, evaluation_usage=None):
     from model_provider import provider, ollama_model, cooldown_model
     if provider() == 'ollama':
         from provider_limits import GUARD
@@ -173,7 +173,8 @@ def call_agent(role, context):
         if guard:
             guard.before_call(cooldown_model())
         with tracing_context(enabled=False):
-            result = ollama_model(SCHEMAS[role], OUTPUT_TOKENS[role]).invoke([
+            options = {} if evaluation_usage is None else {'usage_sink': evaluation_usage}
+            result = ollama_model(SCHEMAS[role], OUTPUT_TOKENS[role], **options).invoke([
                 ('system', INSTRUCTIONS + '\n' + PROMPTS[role]),
                 ('human', json.dumps(compact_context(role, context), ensure_ascii=False))], config={'callbacks': []})
         return SCHEMAS[role].model_validate(result).model_dump()
@@ -188,11 +189,18 @@ def call_agent(role, context):
     if guard:
         guard.before_call(model)
     client = ChatGroq(model=model, api_key=key, base_url='https://api.groq.com', temperature=0,
-                      timeout=60, max_retries=0, max_tokens=OUTPUT_TOKENS[role], reasoning_effort='low').with_structured_output(SCHEMAS[role], method='json_schema', strict=True)
+                      timeout=60, max_retries=0, max_tokens=OUTPUT_TOKENS[role], reasoning_effort='low').with_structured_output(SCHEMAS[role], method='json_schema', strict=True, **({'include_raw': True} if evaluation_usage is not None else {}))
     try:
         with tracing_context(enabled=False):
             result = client.invoke([('system', INSTRUCTIONS + '\n' + PROMPTS[role]),
                                     ('human', json.dumps(compact_context(role, context), ensure_ascii=False))], config={'callbacks': []})
+        if evaluation_usage is not None:
+            usage = getattr(result.get('raw'), 'usage_metadata', None)
+            if usage:
+                evaluation_usage.update(usage)
+            if result.get('parsing_error'):
+                raise result['parsing_error']
+            result = result['parsed']
         return SCHEMAS[role].model_validate(result).model_dump()
     except Exception as error:
         from groq import APIConnectionError, APITimeoutError, AuthenticationError, RateLimitError, APIStatusError

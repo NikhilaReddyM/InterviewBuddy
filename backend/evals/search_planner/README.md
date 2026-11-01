@@ -1,8 +1,8 @@
 # Search Planner evaluation — phase 1 pilot
 
-This folder contains five **draft**, fictional cases for learning dataset labeling.
-It does not yet contain a model runner, evaluators, measured results, or a LangSmith
-upload. No model calls or external writes are needed to review this phase.
+This folder contains five fictional pilot cases, reference criteria, and an isolated
+runner. Review status is recorded per case in `dataset.jsonl`. Evaluators and formal
+baseline/improved experiments are a later phase.
 
 ## Agent boundary
 
@@ -54,8 +54,8 @@ SP-004 mean there is no mandatory keyword; the behavior still requires a useful,
 grounded fallback. Interpret forbidden concepts semantically: an accurate rationale
 mentioning prior QA experience is not the same as searching for excluded QA roles.
 
-See [rubric.md](rubric.md) for the proposed human labeling rules. All labels remain
-draft until a person reviews them; validation of JSON/schema is not label approval.
+See [rubric.md](rubric.md) for the proposed human labeling rules. Validation of
+JSON/schema is not label approval.
 
 ## Grow this into the final golden dataset
 
@@ -71,8 +71,55 @@ formal baseline. Later changes need a new dataset version and matching reruns.
 Keep baseline and improved predictions in separate result artifacts, never in
 place of these reference labels.
 
-## Next phase
+## Run the pilot (phase 2)
 
-Add an opt-in traceable runner and evaluators, verify one parent trace with a child
-model run, and then upload reviewed cases to LangSmith. The existing shared model
-function disables tracing, so uploading these examples alone would not enable it.
+Run these commands from the repository root, using the backend virtual environment.
+
+Validate all cases without model calls, credentials, or uploads:
+
+```sh
+backend/.venv/bin/python backend/evals/search_planner/run.py --dry-run
+```
+
+Run one case with the app's configured provider/model, saving only local results:
+
+```sh
+backend/.venv/bin/python backend/evals/search_planner/run.py --case-id SP-001
+```
+
+To upload traces, set `LANGSMITH_API_KEY` in your environment or untracked
+`backend/.env`, then explicitly enable tracing:
+
+```sh
+backend/.venv/bin/python backend/evals/search_planner/run.py \
+  --case-id SP-001 --trace --run-name pilot-baseline \
+  --project interviewbuddy-search-planner-eval
+```
+
+The SDK also supports its usual `LANGSMITH_ENDPOINT` setting for your account's
+endpoint. `--trace` explicitly enables tracing; normal app calls and runner calls
+without that flag keep tracing disabled, even if tracing environment flags are on.
+Only upload fictional or anonymized inputs: traces contain facts, preferences,
+reference criteria, the actual prompt, and generated output.
+
+Each case creates a `Search Planner evaluation case` parent and a `Model call` LLM
+child. The runner reuses the current prompt, schema, provider, and model options.
+Prompt/schema/token-limit content is fingerprinted as `prompt_version`; case
+metadata includes dataset version, review status, provider/model, and run name.
+Results include a dataset file hash, predicted output, error classification,
+elapsed seconds, available usage counts, and trace ID/URL. Unknown token usage is
+`null`, not zero. Correctness remains `null`/`not_scored` until evaluators are added.
+The model child is an explicit SDK trace around the existing structured call, with
+framework auto-tracing disabled to avoid duplicate runs.
+
+Results default to ignored `backend/data/evals/`. `--output PATH` selects a new file;
+the runner refuses to overwrite existing files. Cases execute sequentially and
+each result is flushed immediately. Model failures produce classified error rows
+and a nonzero exit status; raw exception bodies are not saved. Upload failures
+may still be reported by the SDK; a local result is not proof of a successful
+upload.
+
+Start with one case. In LangSmith verify its input/output, parent/child nesting,
+prompt version, model, latency and available token counts. Then omit `--case-id`
+to run all five. This runner emits traces; it does not yet upload a LangSmith
+dataset or create a scored evaluation experiment.

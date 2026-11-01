@@ -62,7 +62,7 @@ def saved_cooldown(progress):
     return progress.get('retry_at') if progress.get('retry_provider', 'groq') == provider() else None
 
 
-def ollama_model(schema, max_tokens):
+def ollama_model(schema, max_tokens, *, usage_sink=None):
     settings = local_settings()
     def invoke(messages):
         if hasattr(messages, 'to_messages'):
@@ -96,7 +96,12 @@ def ollama_model(schema, max_tokens):
             result = response.json()
             if not isinstance(result, dict) or not result.get('done') or result.get('done_reason') == 'length':
                 raise ValueError('Incomplete response')
-            return schema.model_validate_json(result['message']['content'])
+            parsed = schema.model_validate_json(result['message']['content'])
+            if usage_sink is not None:
+                counts = (result.get('prompt_eval_count'), result.get('eval_count'))
+                if all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in counts):
+                    usage_sink.update(input_tokens=counts[0], output_tokens=counts[1], total_tokens=sum(counts))
+            return parsed
         except HTTPException:
             raise
         except httpx.TimeoutException as error:
