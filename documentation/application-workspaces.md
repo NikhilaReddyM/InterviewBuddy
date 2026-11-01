@@ -86,3 +86,17 @@ retaining text on save failure. No real resume or model provider is needed.
 LangGraph references:
 [Persistence](https://docs.langchain.com/oss/python/langgraph/persistence) and
 [Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts).
+
+## Additional facts confirmed by the candidate
+
+Career Profile can now contain resume-backed facts and new facts explicitly
+confirmed by the candidate. Resume-backed facts retain matching resume evidence;
+new facts carry `source=user` and `user_confirmed=true` and do not pretend to have
+a resume quote. Unconfirmed additions cannot be saved, and editing their statement
+requires a fresh accuracy confirmation. Generated resume facts cannot use this
+manual-confirmation path to bypass evidence validation.
+
+After saving and confirming the profile, new workspaces and reassessments use the
+new profile version. Existing workspace snapshots and drafts remain unchanged.
+Agent prompts and supporting-fact displays preserve the distinction between
+resume evidence and information confirmed by the candidate.

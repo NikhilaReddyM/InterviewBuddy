@@ -12,9 +12,12 @@ it('starts autonomous discovery using the selected resume and review date', asyn
   render(<Opportunities onOpenWorkspace={vi.fn()} />)
   const user = userEvent.setup()
   await screen.findByRole('option', { name: 'Resume.pdf' })
+  expect(screen.getByRole('button', { name: 'Find opportunities' })).toBeDisabled()
   await user.selectOptions(screen.getByLabelText('Resume profile'), 'resume')
   await user.selectOptions(screen.getByLabelText('Maximum applications per run'), '1')
+  expect(screen.getByLabelText('Remind me to review on')).not.toBeVisible()
   await user.click(screen.getByLabelText('Use configured reminder timing instead of a specific date'))
+  expect(screen.getByLabelText('Remind me to review on')).toBeVisible()
   await user.click(screen.getByRole('button', { name: 'Find opportunities' }))
   await screen.findByText(/Search started/)
   const sent = JSON.parse(fetcher.mock.calls[3][1].body)
@@ -69,11 +72,12 @@ it('shows preferences and partial rejection decisions before matching finishes',
 })
 it('shows a manual cooldown without making automatic retries', async () => {
   const batch = { id: 'cooldown', status: 'waiting', created_at: '2026-10-30T12:00:00Z', progress: { retry_at: Date.now() / 1000 + 120, error: 'Old rate limit', events: ['Paused for cooldown'], items: [] } }
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response([batch])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([])))
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response([batch])).mockResolvedValueOnce(response([{ id: 'resume', filename: 'Resume.pdf' }])).mockResolvedValueOnce(response([])))
   render(<Opportunities onOpenWorkspace={vi.fn()} />)
   expect(await screen.findByRole('button', { name: 'Cooldown active…' })).toBeDisabled()
   expect(screen.getByText(/Automatic retries are off/)).toBeInTheDocument()
   expect(screen.queryByText('Old rate limit')).not.toBeInTheDocument()
+  await userEvent.selectOptions(screen.getByLabelText('Resume profile'), 'resume')
   expect(screen.getByRole('button', { name: 'Find opportunities' })).toBeEnabled()
 })
 

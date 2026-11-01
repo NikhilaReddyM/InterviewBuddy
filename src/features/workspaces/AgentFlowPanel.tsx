@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Sparkles, MessageCircle, RotateCcw } from 'lucide-react'
 import { Button } from '../../components/Button'
 
-type Fact = { text: string; evidence?: string; question?: string }
+type Fact = { text: string; source?: 'resume' | 'user'; evidence?: string; question?: string }
 type Claim = { text: string; source_ids: string[] }
 type Run = {
   id: string; checkpoint_id: string; paused: boolean; error?: string | null; next: string[]
@@ -64,7 +64,7 @@ export function AgentFlowPanel({ workspaceId, runs, onSaved }: { workspaceId: st
   run?.state.answers?.forEach(answer => { sourceFacts[answer.id] = { text: answer.answer, question: answer.question } })
   const questions = run?.paused ? run.state.decision?.questions ?? [] : []
   function evidence(ids: string[]) {
-    return ids.length ? <details className="career-details"><summary>Supporting facts ({ids.length})</summary>{ids.map(sourceId => <blockquote key={sourceId}><p>{sourceFacts[sourceId]?.text ?? 'Source unavailable'}</p>{sourceFacts[sourceId]?.evidence && <small>Resume: {sourceFacts[sourceId].evidence}</small>}{sourceFacts[sourceId]?.question && <small>Your answer to: {sourceFacts[sourceId].question}</small>}</blockquote>)}</details> : null
+    return ids.length ? <details className="career-details"><summary>Supporting facts ({ids.length})</summary>{ids.map(sourceId => <blockquote key={sourceId}><p>{sourceFacts[sourceId]?.text ?? 'Source unavailable'}</p>{sourceFacts[sourceId]?.source === 'user' && <small>Confirmed by you in Career Profile</small>}{sourceFacts[sourceId]?.evidence && <small>Resume: {sourceFacts[sourceId].evidence}</small>}{sourceFacts[sourceId]?.question && <small>Your answer to: {sourceFacts[sourceId].question}</small>}</blockquote>)}</details> : null
   }
   return <section className="agent-panel" aria-busy={busy}>
     <div className="career-section-heading"><div><p className="eyebrow">APPLICATION COPILOT</p><h3>Prepare an application with your agents</h3></div><Sparkles size={24} aria-hidden="true" /></div>

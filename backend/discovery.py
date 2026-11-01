@@ -295,7 +295,7 @@ def _process_batch(store, batch_id):
                 if candidates:
                     # Keep discovery prompts small and checkpoint each group. Exact resume
                     # evidence is retained in the snapshot; matching needs fact statements only.
-                    compact_facts = {key: {'category': fact.get('category', ''), 'text': fact['text']}
+                    compact_facts = {key: {'category': fact.get('category', ''), 'text': fact['text'], 'source': fact.get('source', 'resume'), 'user_confirmed': fact.get('user_confirmed', False)}
                                      for key, fact in facts.items()}
                     matches = progress.setdefault('match_results', [])
                     done = {match['candidate_id'] for match in matches}

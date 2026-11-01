@@ -13,7 +13,9 @@ class Fact(BaseModel):
     model_config = ConfigDict(extra='forbid')
     category: Literal['experience', 'skills', 'education', 'projects', 'achievements']
     text: str = Field(min_length=1, max_length=3000)
-    evidence: str = Field(min_length=1, max_length=4000)
+    evidence: str = Field(default='', max_length=4000)
+    source: Literal['resume', 'user'] = 'resume'
+    user_confirmed: bool = False
 
 
 class ExtractedProfile(BaseModel):
@@ -49,6 +51,14 @@ def canonical_quote(quote, source):
 
 def validate_facts(facts, source):
     for index, fact in enumerate(facts, 1):
+        if not fact.text.strip():
+            raise HTTPException(422, f'Fact {index} needs a statement.')
+        if fact.source == 'user':
+            if not fact.user_confirmed:
+                raise HTTPException(422, f'Confirm the accuracy of fact {index} before saving this added information.')
+            fact.evidence = ''  # User assertions must never look like resume quotes.
+            continue
+        fact.user_confirmed = False
         quote = canonical_quote(fact.evidence, source)
         if not fact.text.strip() or quote is None:
             raise HTTPException(422, f'Fact {index} ({fact.category}) has missing or unmatched resume evidence. '
@@ -66,6 +76,8 @@ def extract_with_evidence(client, source):
         ('human', source)]
     for attempt in range(2):
         result = ExtractedProfile.model_validate(client.invoke(messages, config={'callbacks': []}))
+        for fact in result.facts:
+            fact.source, fact.user_confirmed = 'resume', False
         try:
             validate_facts(result.facts, source)
             if not result.facts:
@@ -218,6 +230,9 @@ def register(app, data_dir):
             if read(db, resume_id):
                 raise HTTPException(409, 'A profile already exists. Edit it rather than overwrite your corrections.')
             result = generate_profile(text)
+            for fact in result.facts:
+                fact.source, fact.user_confirmed = 'resume', False
+            validate_facts(result.facts, text)
             payload = {**result.model_dump(), 'preferences': Preferences().model_dump()}
             try:
                 with db:

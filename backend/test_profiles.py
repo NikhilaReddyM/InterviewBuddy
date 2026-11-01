@@ -41,6 +41,33 @@ class ProfileTests(unittest.TestCase):
         self.assertIsNone(draft['confirmed_at'])
         self.assertEqual(self.api['get_profile']('one')['revision'], 3)
 
+    def test_user_confirmed_new_information_saves_without_resume_quote(self):
+        self.generate()
+        added = Fact(category='skills', text='Terraform infrastructure experience', source='user', user_confirmed=True, evidence='Not actually a resume quote')
+        saved = self.api['save_profile']('one', ProfileUpdate(facts=[added, self.fact], preferences=Preferences(), revision=1, confirm=True))
+        self.assertIsNotNone(saved['confirmed_at'])
+        self.assertEqual(saved['facts'][0]['source'], 'user')
+        self.assertTrue(saved['facts'][0]['user_confirmed'])
+        self.assertEqual(saved['facts'][0]['evidence'], '')
+        self.assertEqual(self.api['get_profile']('one')['facts'][0]['text'], added.text)
+        self.assertEqual(saved['facts'][1]['source'], 'resume')
+
+    def test_unconfirmed_new_information_does_not_overwrite_profile(self):
+        self.generate()
+        added = Fact(category='skills', text='Terraform', source='user')
+        with self.assertRaises(HTTPException) as caught:
+            self.api['save_profile']('one', ProfileUpdate(facts=[added], preferences=Preferences(), revision=1, confirm=True))
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn('Confirm the accuracy', caught.exception.detail)
+        self.assertEqual(self.api['get_profile']('one')['revision'], 1)
+
+    def test_resume_source_still_requires_matching_evidence(self):
+        self.generate()
+        added = Fact(category='skills', text='Terraform', user_confirmed=True)
+        with self.assertRaises(HTTPException):
+            self.api['save_profile']('one', ProfileUpdate(facts=[added], preferences=Preferences(), revision=1))
+        self.assertEqual(self.api['get_profile']('one')['revision'], 1)
+
     def test_bad_evidence_does_not_overwrite(self):
         self.generate()
         with self.assertRaises(HTTPException):
@@ -82,6 +109,15 @@ class EvidenceRecoveryTests(unittest.TestCase):
         client.invoke.side_effect = [invalid, valid]
         result = extract_with_evidence(client, 'Python services')
         self.assertEqual(result.facts[0].evidence, 'Python')
+        self.assertEqual(client.invoke.call_count, 2)
+
+    def test_generated_facts_cannot_claim_manual_confirmation_to_bypass_evidence(self):
+        from unittest.mock import Mock
+        from profiles import extract_with_evidence
+        client = Mock()
+        client.invoke.return_value = ExtractedProfile(facts=[Fact(category='skills', text='Terraform', source='user', user_confirmed=True)])
+        with self.assertRaises(HTTPException):
+            extract_with_evidence(client, 'Python services')
         self.assertEqual(client.invoke.call_count, 2)
 
     def test_failed_repair_stops(self):

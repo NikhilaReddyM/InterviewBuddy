@@ -90,4 +90,49 @@
 .application-form-panel { margin: 20px 0; padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .application-form-panel .actions { margin: 16px 0; }
 @media (max-width: 600px) { .run-history-controls { grid-template-columns: 1fr; } .discovery-run > summary { padding: 14px; } .application-form-panel { padding: 16px; } }
-@media (min-width: 1100px) { .discovery-controls .career-preference-grid { grid-template-columns: 1.4fr 1fr 1fr; } }
+
+
+/* Focused job discovery form */
+.job-discovery { scroll-margin-top: 24px; }
+.discovery-header, .discovery-heading { display: flex; align-items: center; gap: 14px; }
+.discovery-header { justify-content: space-between; margin-bottom: 12px; }
+.discovery-heading { min-width: 0; }
+.discovery-heading .eyebrow { margin: 0 0 6px; }
+.discovery-heading h2 { margin: 0; font-size: 1.45rem; letter-spacing: -.025em; }
+.discovery-icon { display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 48px; color: var(--accent); background: var(--soft); border: 1px solid var(--border); border-radius: 14px; }
+.discovery-threshold { color: var(--accent); background: var(--soft); border: 1px solid var(--border); border-radius: 20px; padding: 7px 12px; font-size: .78rem; font-weight: 650; white-space: nowrap; }
+.job-discovery .discovery-intro { margin: 0 0 26px; line-height: 1.6; max-width: 680px; }
+.discovery-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 30px; align-items: start; }
+.discovery-layout > form { min-width: 0; }
+.discovery-controls { margin-bottom: 0; }
+.discovery-inputs { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; }
+.discovery-inputs .field { margin: 0; min-width: 0; }
+.job-discovery select { margin: 0; min-height: 46px; background: var(--surface); }
+.job-discovery .field label { display: block; margin-bottom: 10px; font-size: .85rem; }
+.discovery-helper { color: var(--muted); font-size: .8rem; line-height: 1.6; margin: 12px 0 0; }
+.discovery-reminder { margin: 24px 0; padding: 18px; border: 1px solid var(--border); border-radius: 12px; }
+.discovery-reminder-heading { display: flex; align-items: center; gap: 9px; font-size: .88rem; margin-bottom: 12px; }
+.discovery-reminder-heading svg { color: var(--accent); flex-shrink: 0; }
+.discovery-reminder-choice { display: flex; align-items: flex-start; gap: 10px; font-size: .83rem; line-height: 1.5; cursor: pointer; }
+.discovery-reminder-choice input { margin: 3px 0 0; width: 16px; height: 16px; flex: 0 0 16px; accent-color: var(--accent); }
+.discovery-date { margin-top: 16px; max-width: 280px; }
+.discovery-date[hidden] { display: none; }
+.discovery-date input { width: 100%; }
+.discovery-launch { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.discovery-launch .button { min-height: 46px; gap: 10px; }
+.discovery-launch > p { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.5; flex: 1; min-width: 140px; }
+.discovery-process { border: 1px solid var(--border); border-radius: 14px; padding: 22px; background: var(--soft); }
+.discovery-process > .eyebrow { font-size: .67rem; margin: 0 0 20px; }
+.discovery-process ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; }
+.discovery-process li { display: flex; gap: 12px; }
+.discovery-step-icon { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 9px; background: var(--surface); border: 1px solid var(--border); color: var(--accent); }
+.discovery-process li strong { font-size: .85rem; }
+.discovery-process li p { font-size: .8rem; line-height: 1.6; color: var(--muted); margin: 5px 0 0; }
+.discovery-process-note { border-top: 1px solid var(--border); padding-top: 16px; margin: 20px 0 0; font-size: .76rem; line-height: 1.6; color: var(--muted); }
+.discovery-coverage { border-top: 1px solid var(--border); padding-top: 12px; margin: 24px 0 0; font-size: .8rem; }
+.discovery-coverage p { line-height: 1.7; max-width: 880px; }
+.discovery-spinner { animation: discovery-spin 1s linear infinite; }
+@keyframes discovery-spin { to { transform: rotate(360deg); } }
+@media (max-width: 1100px) { .discovery-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; } .discovery-process ol { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; } .discovery-process li { flex-direction: column; } }
+@media (max-width: 600px) { .discovery-header { align-items: flex-start; } .discovery-heading h2 { font-size: 1.2rem; } .discovery-icon { width: 40px; height: 40px; flex-basis: 40px; border-radius: 11px; } .discovery-threshold { display: none; } .discovery-inputs { grid-template-columns: minmax(0, 1fr); gap: 18px; } .discovery-process ol { grid-template-columns: minmax(0, 1fr); } .discovery-process li { flex-direction: row; } .discovery-launch .button { width: 100%; justify-content: center; } .discovery-reminder { padding: 16px; } }
+@media (prefers-reduced-motion: reduce) { .discovery-spinner { animation: none; } }
