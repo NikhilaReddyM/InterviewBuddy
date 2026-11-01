@@ -106,6 +106,9 @@ def setup(store):
           id TEXT PRIMARY KEY,preview_id TEXT NOT NULL REFERENCES email_digest_previews(id),
           content_hash TEXT NOT NULL UNIQUE,status TEXT NOT NULL,message TEXT NOT NULL,
           created_at TEXT NOT NULL,sent_at TEXT);
+        CREATE TABLE IF NOT EXISTS discovery_email_notifications (
+          batch_id TEXT NOT NULL,outcome_key TEXT NOT NULL,status TEXT NOT NULL,preview_id TEXT,delivery_id TEXT,message TEXT NOT NULL,created_at TEXT NOT NULL,
+          PRIMARY KEY(batch_id,outcome_key));
         CREATE TABLE IF NOT EXISTS email_digest_slots (
           scheduled_for TEXT PRIMARY KEY,status TEXT NOT NULL,delivery_id TEXT,message TEXT NOT NULL);
         ''')
@@ -275,10 +278,10 @@ def _deliver(store, preview_id, retry=False):
         existing = db.execute('SELECT * FROM email_digest_deliveries WHERE content_hash=?', (row['content_hash'],)).fetchone()
         explicit_failed_retry = retry and existing and existing['status'] == 'failed'
         changed_address = payload['recipient'] != settings['recipient'] or payload['sender'] != smtp['sender']
-        changed_app = any(not item['review_url'].startswith(settings['app_base_url'] + '/?') for item in payload['items'])
+        changed_app = any(not item['review_url'].startswith(settings['app_base_url'] + '/?') for item in payload['items']) or (payload.get('kind') == 'discovery_results' and not payload.get('batch_url', '').startswith(settings['app_base_url'] + '/?'))
         if changed_address or changed_app or (payload['settings_revision'] != settings['revision'] and not explicit_failed_retry):
             raise HTTPException(409, 'Delivery settings changed. Preview the digest again before sending.')
-        if not payload['items']:
+        if not payload['items'] and payload.get('kind') != 'discovery_results':
             return {'status': 'skipped_empty', 'message': 'No pending reviews; no email was sent.'}
         if existing and not explicit_failed_retry:
             result = dict(existing)
@@ -308,6 +311,97 @@ def deliver(store, preview_id, retry=False):
     with digest_lock(store):
         reconcile_interrupted(store)
         return _deliver(store, preview_id, retry)
+
+
+def discovery_outcome(batch):
+    """Hash saved work, excluding delivery status, event chatter and clock time."""
+    progress = batch['progress']
+    content = {'status': batch['status'], 'error': progress.get('error'),
+               'matches': progress.get('matches', progress.get('match_results', [])),
+               'items': [{key: item.get(key) for key in ('candidate_id', 'workspace_id', 'run_id', 'status', 'error')} for item in progress.get('items', [])]}
+    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+
+def discovery_preview(store, batch, outcome_key):
+    settings = get_settings(store)
+    progress = batch['progress']
+    matches = progress.get('matches', progress.get('match_results', []))
+    items = []
+    batch_url = settings['app_base_url'] + '/?' + urlencode({'discovery_batch_id': batch['id']}) + '#discovery-history'
+    subject = f"InterviewBuddy: discovery {batch['status']} — run {batch['id'][:8]}"
+    lines = [subject, '', f"Profile version: {batch['profile_revision']}",
+             f"Scored {len(matches)} of {len(progress.get('candidates', []))} shortlisted roles; {sum(m['score'] >= 70 for m in matches)} scored at least 70/100.",
+             'These are results for this discovery run. No applications have been submitted.', '']
+    if progress.get('error'):
+        lines.extend(['Run needs attention: ' + progress['error'], 'Completed work is saved. Resume manually when ready.', ''])
+    for item in progress.get('items', []):
+        job = next((j for j in progress.get('candidates', []) if j['candidate_id'] == item['candidate_id']), {})
+        match = item.get('match', {})
+        review_url = settings['app_base_url'] + '/?' + urlencode({'workspace_id': item['workspace_id']}) if item.get('workspace_id') else batch_url
+        entry = {'review_url': review_url, 'company': job.get('company', ''), 'role': job.get('role', ''),
+                 'status': item.get('status', 'incomplete'), 'score': match.get('score'), 'application_url': job.get('url', '')}
+        items.append(entry)
+        lines.extend([f"{entry['company']} — {entry['role']}", f"Status: {entry['status'].replace('_', ' ')} | Match: {entry['score']}/100"])
+        if match.get('reason'):
+            lines.append('Why it matched: ' + match['reason'][:1000])
+        lines.extend('Check: ' + caution for caution in match.get('cautions', [])[:5])
+        if item.get('error'):
+            lines.append('Needs attention: ' + item['error'])
+        lines.extend(['Review in InterviewBuddy: ' + review_url, 'Original application: ' + entry['application_url'], ''])
+    if not items:
+        lines.extend(['No application drafts were prepared in this run. Check matching decisions, preferences or source errors in the saved results.', ''])
+    for error in progress.get('source_errors', [])[:5]:
+        lines.append('Source caution: ' + error)
+    lines.extend(['View discovery results: ' + batch_url,
+                  'Employer-form preparation may still be finishing. Open InterviewBuddy for its latest status.',
+                  'Localhost links work on the computer running InterviewBuddy. Final review and submission are yours.'])
+    payload = {'kind': 'discovery_results', 'batch_id': batch['id'], 'batch_url': batch_url,
+               'recipient': settings['recipient'], 'sender': settings['smtp']['sender'], 'subject': subject,
+               'text': '\n'.join(lines), 'items': items, 'settings_revision': settings['revision']}
+    content_hash = hashlib.sha256(json.dumps([batch['id'], outcome_key, payload['recipient'], payload['sender']], sort_keys=True).encode()).hexdigest()
+    preview_id = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    with store.connect() as db:
+        db.execute('INSERT OR IGNORE INTO email_digest_previews VALUES (?,?,?,?)', (preview_id, json.dumps(payload), content_hash, now()))
+    return preview_id
+
+
+def notify_discovery_results(store, batch_id, retry=False):
+    """One completion email per meaningful saved outcome; never rerun discovery."""
+    from discovery import batch_detail
+    setup(store)
+    batch = batch_detail(store, batch_id)
+    if batch['status'] not in ('completed', 'partial', 'failed', 'waiting') or batch['is_running']:
+        return
+    outcome_key = discovery_outcome(batch)
+    with store.connect() as db:
+        row = db.execute('SELECT * FROM discovery_email_notifications WHERE batch_id=? AND outcome_key=?', (batch_id, outcome_key)).fetchone()
+    if row and (not retry or row['status'] in ('sent', 'unknown')):
+        return dict(row)
+    result = {'status': 'failed', 'message': 'Could not send the results email. Saved discovery results are unchanged.'}
+    preview_id = row['preview_id'] if row else None
+    try:
+        settings = get_settings(store)
+        if not settings['enabled']:
+            result = {'status': 'disabled', 'message': 'Results email was not sent because email delivery is disabled. Enable email delivery, then use Send results email.'}
+        elif not settings['smtp']['configured']:
+            result = {'status': 'failed', 'message': 'SMTP configuration needs attention. Fix delivery settings, then retry the results email; discovery does not need to run again.'}
+        else:
+            with digest_lock(store):
+                reconcile_interrupted(store)
+                # Keep a previously attempted preview fixed. Address changes still
+                # require explicit preview review through delivery history.
+                if not row or not row['delivery_id']:
+                    preview_id = discovery_preview(store, batch, outcome_key)
+                result = _deliver(store, preview_id, retry=retry)
+    except HTTPException as error:
+        result = {'status': 'pending' if error.status_code == 409 else 'failed',
+                  'message': error.detail + ' Retry the results email from this run; no job search will be repeated.'}
+    except Exception:
+        pass  # Do not expose SMTP/provider bodies or change the discovery outcome.
+    with store.connect() as db:
+        db.execute("INSERT INTO discovery_email_notifications VALUES (?,?,?,?,?,?,?) ON CONFLICT(batch_id,outcome_key) DO UPDATE SET status=excluded.status,preview_id=excluded.preview_id,delivery_id=excluded.delivery_id,message=excluded.message WHERE discovery_email_notifications.status NOT IN ('sent','unknown') OR excluded.status IN ('sent','unknown')",
+                   (batch_id, outcome_key, result['status'], preview_id, result.get('id'), result['message'], now()))
+        return dict(db.execute('SELECT * FROM discovery_email_notifications WHERE batch_id=? AND outcome_key=?', (batch_id, outcome_key)).fetchone())
 
 
 def tick(store, current_time=None):

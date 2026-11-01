@@ -16,11 +16,13 @@ My agent helps software engineers discover relevant jobs and prepare application
 
 ## 2. Project overview
 
-InterviewBuddy’s Week 3 feature is a job application copilot. A candidate uploads a PDF or DOCX resume, confirms an evidence-backed profile, and provides job preferences. The system discovers opportunities, scores their relevance, drafts application materials, checks claims, and prepares supported employer forms for later review.
+InterviewBuddy’s Week 3 feature is a job application copilot. A candidate uploads a PDF or DOCX resume, confirms a profile, and provides job preferences. Resume-derived facts retain supporting passages; additional facts can be explicitly confirmed by the candidate and are labeled separately. The system discovers opportunities, scores their relevance, drafts application materials, checks claims, and prepares supported employer forms for later review.
 
 A score of **70/100 or higher** is the final drafting gate. Selected jobs proceed in score order, within a configured limit of one to three applications per run. The drafting stage does not reconsider whether the candidate should apply; it focuses on creating supported materials and identifying unanswered questions.
 
 The intended result is an application ready for human inspection: cover letter, resume suggestions, available screening answers, match reasoning, gaps, reminders, and a browser action that restores the supported employer form. I review the actual employer page and submit the application myself.
+
+With email delivery enabled, a manual discovery run sends a results email when it finishes or pauses, including runs with no drafts or errors. Scheduled review digests retain their configured timing. Delivery status and an email-only retry action appear in discovery history.
 
 The Week 2 PDF study and cited Q&A features remain in the app, but they are separate from this Week 3 application workflow.
 
@@ -29,13 +31,13 @@ The Week 2 PDF study and cited Q&A features remain in the app, but they are sepa
 | Field | Implementation |
 |---|---|
 | Agent goal | Find relevant opportunities and prepare honest, reviewable applications using a confirmed candidate profile. Final submission remains with the candidate. |
-| Where people use it | The InterviewBuddy React web interface on a local computer. A dedicated Chromium window provides the employer-form handoff; optional email digests link back to saved reviews. |
+| Where people use it | The InterviewBuddy React web interface on a local computer. A dedicated Chromium window provides the employer-form handoff; enabled results emails and review digests link back to saved runs or reviews. |
 | Steps in order | Upload and confirm a profile; discover and shortlist jobs; score matches; analyze and draft selected applications; review and revise; prepare employer fields; create reminders; hand off for final review and submission. Discovery can start manually or from an enabled schedule. |
-| Tools and actions | Read public job listings and form schemas; save workspaces and drafts; fill browser fields and upload the original resume; create review reminders; send an enabled email digest. Reads are autonomous; application preparation and notification writes follow configured authorization, while submission is always manual. |
+| Tools and actions | Read public job listings and form schemas; save workspaces and drafts; fill browser fields and upload the original resume; create review reminders; send enabled manual-run results emails and scheduled review digests. Reads are autonomous; application preparation and notification writes follow configured authorization, while submission is always manual. |
 | Memory | SQLite stores confirmed profiles, immutable profile snapshots, job listings, match decisions, draft versions, findings, form plans, reminders and schedules. LangGraph checkpoints preserve application-agent execution across interruptions. |
 | Hard limits | Do not invent candidate qualifications, work authorization, salary preferences, consent or personal declarations. Do not click Submit/Apply/Continue, bypass verification, or claim that a link preserves a draft without evidence. |
 | Human-in-the-loop | The candidate initially confirms the profile and contact details and configures schedules/email. The main discovery flow does not require approval at every stage; unknown answers, unresolved findings, verification and final submission are handed to the candidate. |
-| Failure handling | Save completed work, show an actionable error and allow explicit recovery. Provider cooldowns do not cause repeated automatic retries; supported browser forms can be restored from locally saved answers after a restart. |
+| Failure handling | Save completed work, show an actionable error and allow explicit recovery. Email failures do not change a completed discovery result, and email-only retries do not rerun discovery. Provider cooldowns do not cause repeated automatic retries; supported browser forms can be restored from locally saved answers after a restart. |
 | Success measure | A usable application package and supported employer-form handoff within ten minutes in at least eight of ten labeled cases, with supported claims and unknown information left unanswered. This remains a target pending a broader evaluation. |
 
 ## 4. Architecture
@@ -49,52 +51,57 @@ Insert [this PNG diagram](assets/week3-architecture.png) into the Google Doc. Th
 
 ```mermaid
 flowchart TD
-    UI[React web interface] --> API[FastAPI backend]
-    API --> Profile[Resume extraction and confirmed profile]
-    Profile --> Store[(SQLite profiles and workspaces)]
+    UI[React interface]:::control --> API[FastAPI orchestration]:::control
+    API --> Setup[Setup: resume facts and candidate confirmations]:::control
+    Setup --> Store[(SQLite profiles, drafts, forms and reminders)]:::state
+    Manual[Manual run]:::control --> A1
+    Schedule[Enabled discovery schedule]:::control --> A1
 
-    Manual[Manual discovery] --> Discovery[Discovery workflow]
-    Schedule[Enabled local schedule] --> Discovery
-    Discovery --> Planner[Search Planner: choose keywords]
-    Planner --> Feeds[Public job-source readers]
-    Feeds --> Shortlist[Normalize, filter and deduplicate]
-    Shortlist --> Matcher[Matcher: score and explain fit]
-    Matcher --> Gate{Score at least 70?}
-    Gate -->|No| History[Save match decision]
-    Gate -->|Yes, within run limit| Analyst[Analyst]
-    Analyst --> Coordinator[Coordinator: route draft quality]
-    Coordinator --> Writer[Writer]
-    Writer --> Reviewer[Reviewer]
-    Reviewer --> Quality{Blocking findings?}
-    Quality -->|Yes, budget remains| Coordinator
-    Quality -->|No| Ready[Ready for human review]
-    Quality -->|Revision limit reached| Attention[Needs human review]
+    subgraph Discovery[Discovery]
+      A1["AGENT 1 · Search Planner Agent<br/>Choose profile-based keywords"]:::agent
+      Feed["TOOL · Public job feeds<br/>Fetch, normalize and shortlist in code"]:::tool
+      A2["AGENT 2 · Job Matcher Agent<br/>Score relevance and explain gaps"]:::agent
+      Gate{"CODE RULE<br/>Score ≥ 70; respect run limit"}:::control
+      A1 --> Feed --> A2 --> Gate
+    end
+    API --> A1
+    Gate -->|Below threshold| History[Save match decision]:::control
 
-    Ready --> Form[Read actual Greenhouse form]
-    Attention --> Form
-    Form --> Answers[Map contacts and evidence-backed answers]
-    Answers --> FormReview[Review generated form answers]
-    FormReview --> Plan[(Persistent form plan)]
-    Plan --> Browser[Dedicated Playwright browser]
-    Browser --> Handoff[Restore fields for human review]
-    Handoff --> Human[Candidate reviews and submits manually]
+    subgraph Drafting[Application graph: LangGraph]
+      A3["AGENT 3 · Analyst Agent<br/>Requirements and supporting facts"]:::agent
+      Coordinator["CODE · Coordinator<br/>Route write, revise or finish"]:::control
+      A4["AGENT 4 · Writer Agent<br/>Application materials"]:::agent
+      A5["AGENT 5 · Reviewer Agent<br/>Check claims and completeness"]:::agent
+      Quality{"CODE RULE<br/>Blocking findings?"}:::control
+      A3 --> Coordinator --> A4 --> A5 --> Quality
+      Quality -->|Revise; up to 3 Writer passes| Coordinator
+    end
+    Gate -->|Selected| A3
+    Quality -->|Complete or needs human review at limit| Saved[Persist drafts and findings]:::control
 
-    Ready --> Reminders[Review reminders]
-    Attention --> Reminders
-    Reminders --> Email[Optional SMTP email digest]
-    Email --> UI
+    subgraph Forms[Employer-form preparation]
+      Schema["TOOL · Greenhouse schema reader"]:::tool
+      A6["AGENT 6 · Form Answer Agent<br/>Draft supported field answers"]:::agent
+      Reused["AGENT 5 reused · Reviewer Agent<br/>Check generated form answers"]:::agent
+      Plan[(Saved form plan and attachment reference)]:::state
+      Browser["TOOL · Playwright browser worker<br/>Fill fields; no automatic submission"]:::tool
+      Schema --> A6 --> Reused --> Plan --> Browser
+    end
+    Saved --> Schema
+    Browser --> Human["HUMAN · Review and submit"]:::human
+    Saved --> Reminders["CODE · Review reminders"]:::control
+    Result["CODE · Manual-run results notification"]:::control --> SMTP["TOOL · SMTP delivery"]:::tool
+    API -.->|Manual run finishes or pauses| Result
+    Reminders --> Digest["CODE · Enabled scheduled digest"]:::control --> SMTP
+    SMTP --> UI
+    API <--> Store
+    Drafting <--> Checkpoints[(LangGraph checkpoints)]:::state
 
-    Discovery <--> Store
-    Writer <--> Store
-    Reviewer <--> Store
-    Coordinator <--> Checkpoints[(LangGraph SQLite checkpoints)]
-    Models[Configured model: local Ollama/Qwen or Groq] -.-> Planner
-    Models -.-> Matcher
-    Models -.-> Analyst
-    Models -.-> Writer
-    Models -.-> Reviewer
-    Models -.-> Answers
-    Models -.-> FormReview
+    classDef agent fill:#e3f3e9,stroke:#287551,color:#153f2c,stroke-width:2px
+    classDef tool fill:#eef5ff,stroke:#6f92be,color:#213f63
+    classDef control fill:#f1f4f5,stroke:#98a8ae,color:#2b4048
+    classDef state fill:#f2edfa,stroke:#9c87b9,color:#47365c
+    classDef human fill:#fff4df,stroke:#bc9753,color:#654a1c
 ```
 
 </details>
@@ -110,7 +117,24 @@ flowchart TD
 | Validation | Pydantic schemas, source-ID validation, source-passage checks, reviewer findings and final human inspection. |
 | Persistent data | SQLite plus local resume files and isolated browser-profile directories. Mem0 is not used. |
 | Browser | Playwright/Chromium for supported Greenhouse fields and resume upload. |
-| Notifications | Persisted review reminders and opt-in SMTP delivery; Gmail delivery was tested manually. |
+| Notifications | Persisted review reminders, immediate results emails for manual runs, and scheduled review digests through enabled SMTP delivery; Gmail delivery was tested manually. |
+
+### Which components are agents?
+
+Every green box is labeled with **Agent** in its title: Search Planner Agent, Job Matcher Agent, Analyst Agent, Writer Agent, Reviewer Agent, and Form Answer Agent. These are six model-backed specialist roles:
+
+| Diagram label | Role | Model-call key |
+|---|---|---|
+| Agent 1 | Search Planner chooses profile-based keywords. | `search_planner` |
+| Agent 2 | Job Matcher scores relevance and explains gaps. | `job_matcher` |
+| Agent 3 | Analyst maps job requirements to confirmed candidate facts. | `analyst` |
+| Agent 4 | Writer drafts the cover letter, resume suggestions and screening answers. | `writer` |
+| Agent 5 | Reviewer checks claims and completeness; the same role also reviews form answers. | `reviewer` |
+| Agent 6 | Form Answer Agent drafts supported answers to actual employer questions. | `form_answers` |
+
+**The Coordinator is code-driven in the discovery-selected workflow shown here.** It routes writing, revision and completion; it is not counted as a seventh model-backed agent. The separate pasted-job mode can use model-backed coordination, but that is not the flow illustrated here.
+
+Blue boxes are tools/integrations; gray boxes are workflow code or rules; purple boxes are persistent state; the gold box is the human handoff. Browser filling, scheduling, SMTP delivery and SQLite are not agents. All six roles can use the same local Qwen model with different prompts and structured schemas. Form Answer Agent and its Reviewer call run when supported form questions need additional answers. Profile extraction is a setup model call, not a separately counted agent in this diagram.
 
 These agents are specialist roles using the configured model, not separate continuously running model servers. Tools are explicit Python integrations invoked by the workflow. This is a bounded agentic workflow rather than an unrestricted browsing or self-modifying agent.
 
@@ -128,8 +152,8 @@ The system improves the current draft through feedback. It does not train Qwen, 
 
 | Data | Source and use |
 |---|---|
-| Candidate resume | A user-provided PDF/DOCX. Text is extracted locally, and structured facts retain supporting resume passages for confirmation. |
-| Preferences and contacts | User-confirmed target roles, locations, work arrangements, exclusions and form contact details. These are not inferred from missing resume information. |
+| Candidate resume | A user-provided PDF/DOCX. Resume-derived facts retain supporting passages; additional facts require explicit candidate confirmation and are labeled as user-confirmed rather than resume evidence. |
+| Preferences and contacts | User-confirmed target roles, locations, work arrangements, exclusions and form contact details. New career facts outside the resume are accepted only with an accuracy confirmation; generated facts cannot use that path to bypass evidence validation. |
 | Job listings | Public Remotive and Arbeitnow feeds, plus selected Greenhouse and Ashby employer boards. Default employer boards include Datadog, MongoDB, Cloudflare, Ramp and Notion. Coverage is selective, not the entire web. |
 | Application fields | The actual public Greenhouse schema for the selected job, including question labels, required flags, field types and options. |
 | Test fixtures | Synthetic profiles, jobs, model outputs and browser forms for repeatable functional and recovery tests. |
@@ -178,6 +202,8 @@ Employer-side saved drafts are used only after a recognizable save action, visib
 
 The candidate authorizes preparation through the workflow and configuration rather than approving every local write. Filling fields or uploading a resume can transmit information to the employer before submission. Reminders are governed by reminder preferences, email requires explicit enabling, and the final Submit action is always performed by the candidate.
 
+A manual run’s results email is separate from a later scheduled review digest. Delivery uses a stable saved-outcome key to prevent duplicate completion emails; a resumed run can send an updated outcome. SMTP acceptance is recorded as sent, but it is not a guarantee of inbox delivery.
+
 Application schedules run only while the computer is awake and the backend and required local services are running. Changes made solely in the employer browser are not copied back into the saved plan; reusable edits should be saved in InterviewBuddy.
 
 ## 9. Iterations and learnings
@@ -192,6 +218,8 @@ Application schedules run only while the computer is awake and the backend and r
 | Invented screening questions blocked all drafting | Kept the supplied questions authoritative, discarded extras, and left missing or duplicate answers blank for review. |
 | Text drafts did not satisfy the intended task | Added actual employer-field preparation, persistent form plans and a browser handoff. A useful intermediate output is not always completion of the user’s workflow. |
 | MongoDB used a branded page with an embedded application | Located the exact Greenhouse job iframe and handled delayed loading, nullable API fields and hidden cover-letter controls. Live websites need adapter-level validation. |
+| New facts could not be saved without a resume quote | Added explicit candidate-confirmed provenance and an accuracy checkbox, while retaining quote validation for resume-backed facts. New facts appear next to Add fact. |
+| Manual discovery waited for a scheduled digest | Added batch-specific completion/pause emails, visible delivery outcomes and email-only retry without rerunning discovery. |
 | Many discovery runs made the page crowded | Added compact expandable runs, filters, search, pagination and grouped settings. Progress must be understandable to the person reviewing it later. |
 
 The main learning was that useful agent behavior depends on state, controlled routing, recovery and a clear final handoff as much as on prompt quality.
@@ -200,13 +228,14 @@ The main learning was that useful agent behavior depends on state, controlled ro
 
 | Evidence | Observation | What it establishes |
 |---|---|---|
-| Backend functional suite | **154 tests passed** in the latest full run. | Routing, persistence, threshold behavior, reference checks, recovery, deduplication and form-related functional behavior on test cases. |
-| Frontend suite | **138 tests passed** in the latest recorded run. | UI behavior, editing, stale-save feedback and history filtering/pagination on test fixtures. |
+| Backend functional suite | **165 tests passed** in the latest full run. | Routing, persistence, threshold behavior, reference checks, recovery, deduplication and form-related functional behavior on test cases. |
+| Frontend suite | **143 tests passed** in the latest recorded run. | UI behavior, editing, stale-save feedback and history filtering/pagination on test fixtures. |
 | Build and lint | Production build and lint passed. | The app compiles and passes the configured lint checks. |
 | Local Qwen diagnostic | Synthetic search planning: 1.95 seconds; profile extraction: 3.74 seconds; application graph: 20.18 seconds, three draft artifacts. Reopening retained the same run and draft count. | A small live-model diagnostic, not a real-profile latency benchmark or success-rate estimate. |
 | Real Chromium fixture | Filled four synthetic controls: text, dropdown, attachment and expandable cover-letter text; submission count stayed zero. | Browser interaction worked on a controlled local form without submitting it. |
 | Public MongoDB inspection | Verified the Greenhouse schema and live embedded controls without entering applicant information during the developer diagnostic. | The adapter could identify the supported employer form and relevant controls. |
 | Manual application observation | During subsequent manual testing, I observed the MongoDB application being filled in the browser. | A user-observed live application-filling result. Complete field-by-field accuracy and end-to-end elapsed time were not formally scored. |
+| Results-email functional tests | Mocked SMTP tests covered immediate manual-run results, empty results, paused outcomes, duplicate prevention, failed-email recovery and uncertain-delivery protection. | Functional evidence; no live completion email was sent during these tests. |
 | Manual email observation | I confirmed email delivery worked after configuration and explicit retry. | Delivery worked for that manual test; unattended scheduled delivery is not a measured reliability benchmark. |
 
 Automated tests predominantly use fixtures and mocked model boundaries. They do not demonstrate an 80% task-success rate or establish factual accuracy across applications. The Reviewer uses a separate role/prompt but may use the same underlying model as the Writer; it is not an independent evaluation ground truth.

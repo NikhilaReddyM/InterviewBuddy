@@ -83,6 +83,9 @@ def batch_detail(store, batch_id):
         result['profile_revision'] = snapshot['profile_revision']
         result['profile_preferences'] = json.loads(snapshot['payload']).get('preferences', {})
         result['can_redraft_rejected'] = any(item.get('status') == 'role_not_recommended' and item.get('match', {}).get('score', 0) >= DRAFT_MATCH_THRESHOLD for item in result['progress'].get('items', []))
+        email_table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='discovery_email_notifications'").fetchone()
+        email = db.execute('SELECT COALESCE(d.status,n.status) AS status,COALESCE(d.message,n.message) AS message,n.delivery_id FROM discovery_email_notifications n LEFT JOIN email_digest_deliveries d ON d.id=n.delivery_id WHERE n.batch_id=? ORDER BY n.rowid DESC LIMIT 1', (batch_id,)).fetchone() if email_table else None
+        result['results_email'] = dict(email) if email else None
         result['server_time'] = time.time()
         result['cooldown_until'] = saved_cooldown(result['progress'])
         if result['status'] in ('waiting', 'failed', 'partial'):
@@ -428,6 +431,26 @@ def process_batch(store, batch_id):
     from provider_limits import provider_guard
     with provider_guard(store):
         _process_batch(store, batch_id)
+    batch = batch_detail(store, batch_id)
+    if batch['progress'].get('email_on_completion'):
+        from email_digest import notify_discovery_results
+        try:
+            notify_discovery_results(store, batch_id)
+        except Exception:
+            # Email delivery must not turn completed discovery into a failed run.
+            pass
+
+
+def request_results_email(store, batch_id):
+    with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT payload FROM discovery_batches WHERE id=?', (batch_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, 'Discovery batch not found.')
+        progress = json.loads(row['payload'])
+        if not progress.get('email_on_completion'):
+            progress['email_on_completion'] = True
+            db.execute('UPDATE discovery_batches SET payload=?,updated_at=? WHERE id=?', (json.dumps(progress), now(), batch_id))
 
 
 def register(app, store_factory):
@@ -443,6 +466,7 @@ def register(app, store_factory):
     def start_discovery(data: DiscoveryInput, background: BackgroundTasks):
         store = store_factory()
         batch_id = create_batch(store, data)
+        request_results_email(store, batch_id)
         background.add_task(process_batch, store, batch_id)
         return batch_detail(store, batch_id)
 
@@ -481,6 +505,7 @@ def register(app, store_factory):
     def reassess_saved_jobs(batch_id: str, data: ReassessInput, background: BackgroundTasks):
         store = store_factory()
         new_id = reassess_batch(store, batch_id, data)
+        request_results_email(store, new_id)
         background.add_task(process_batch, store, new_id)
         return batch_detail(store, new_id)
 
@@ -498,6 +523,17 @@ def register(app, store_factory):
             progress = batch['progress']
             progress.pop('error', None)
             progress['cooldown_retries'] = 0
+            progress['email_on_completion'] = True
             save_progress(store, batch_id, progress, 'queued')
         background.add_task(process_batch, store, batch_id)
+        return batch_detail(store, batch_id)
+
+    @app.post('/api/discovery/{batch_id}/email')
+    def send_results_email(batch_id: str):
+        store = store_factory()
+        batch = batch_detail(store, batch_id)
+        if batch['is_running'] or batch['status'] in ('queued', 'running'):
+            raise HTTPException(409, 'Wait until this run finishes or pauses before sending its results.')
+        from email_digest import notify_discovery_results
+        notify_discovery_results(store, batch_id, retry=True)
         return batch_detail(store, batch_id)

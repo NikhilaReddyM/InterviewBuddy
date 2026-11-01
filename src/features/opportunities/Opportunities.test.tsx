@@ -105,3 +105,14 @@ it('keeps older runs compact and filters saved activity', async () => {
   await user.type(screen.getByLabelText('Find company or role'), 'Company 11')
   expect(container.querySelectorAll('.discovery-run')).toHaveLength(1)
 })
+
+it('retries a results email without restarting discovery', async () => {
+  const batch = { id: 'b1', status: 'completed', created_at: '2026-11-01T12:00:00Z', results_email: { status: 'failed', message: 'Email was not accepted.' }, progress: { events: [], items: [] } }
+  const fetcher = vi.fn().mockResolvedValueOnce(response([batch])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response([])).mockResolvedValueOnce(response({ ...batch, results_email: { status: 'sent', message: 'Accepted by the SMTP server.' } }))
+  vi.stubGlobal('fetch', fetcher)
+  render(<Opportunities onOpenWorkspace={vi.fn()} />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Retry results email' }))
+  expect(fetcher.mock.calls[3][0]).toBe('/api/discovery/b1/email')
+  expect(await screen.findByText('Results email: sent')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Retry results email' })).not.toBeInTheDocument()
+})

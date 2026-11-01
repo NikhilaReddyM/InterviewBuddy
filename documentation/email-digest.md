@@ -115,3 +115,35 @@ preview/send controls, and workspace deep links. No real email was sent during
 implementation and no delivery account was configured automatically.
 
 A failed email can be retried explicitly from delivery history after changing the schedule time or days. Changing the recipient, sender, or application URL requires a fresh preview. History shows the last attempt time and attempt count. A scheduled slot that encounters the same failed digest does not resend it; use **Retry failed email**.
+
+
+## Manual discovery results emails
+
+With email delivery enabled, **Find opportunities** now requests an immediate,
+batch-specific results email when that manual run completes, partially completes,
+fails or pauses. Manual reassessment and batch resume use the same hook. It reports
+match counts, application outcomes, cautions, errors and review/original links.
+An empty result also produces an email; it is not silently skipped for having no
+drafts. Result emails are independent of reminder due dates and the digest lookahead.
+
+This does not change the scheduled digest time or enable email delivery implicitly.
+Scheduled discovery continues through the same core workflow; its pending reviews
+remain eligible for the separately configured periodic digest. A later scheduled
+review reminder is separate from a manual run’s immediate results email.
+
+Each meaningful saved outcome has a stable batch/outcome key. Replaying an unchanged
+run does not resend its results. Resuming a paused run and reaching a different
+outcome can produce an updated results email. SMTP delivery uses the existing
+persisted ledger, sender lock, TLS and uncertain-delivery protection.
+
+**Discovery history** shows Results email status. **Retry results email** retries
+a known failure, and **Send results email** handles disabled or pending delivery,
+after configuration is fixed. These actions do not run job discovery or models.
+An uncertain SMTP outcome is never resent automatically. Email failure does not
+change a completed discovery run into failed discovery. Sent means the SMTP server
+accepted the message; inbox delivery is not guaranteed by that status.
+
+Result links use `?discovery_batch_id=UUID#discovery-history` to open the correct
+screen and run, including a saved run outside the latest-history page. Application
+links continue to use `?workspace_id=UUID`. Localhost links still require the local
+app to be available on that computer.

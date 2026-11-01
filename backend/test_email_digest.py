@@ -192,6 +192,117 @@ class DigestTests(unittest.TestCase):
             self.assertTrue(caught.exception.uncertain)
             client.starttls.assert_called_once()
 
+    def test_manual_discovery_completion_sends_own_results_outside_due_window_once(self):
+        from discovery import request_results_email, process_batch, batch_detail
+        self.enable()
+        before = get_settings(self.store)['next_run_at']
+        request_results_email(self.store, self.fixture.batch_id)
+        with self.store.connect() as db:
+            db.execute("UPDATE reminders SET due_date='2099-01-01'")
+        with patch('email_digest.smtp_send') as send, patch('application_agents.call_agent') as model:
+            process_batch(self.store, self.fixture.batch_id)
+            process_batch(self.store, self.fixture.batch_id)
+            self.assertEqual(send.call_count, 1)
+            model.assert_not_called()
+            payload = send.call_args.args[0]
+            self.assertEqual(payload['kind'], 'discovery_results')
+            self.assertIn('Example', payload['text'])
+            self.assertIn('discovery_batch_id=', payload['batch_url'])
+            self.assertIn('workspace_id=', payload['items'][0]['review_url'])
+        self.assertEqual(batch_detail(self.store, self.fixture.batch_id)['results_email']['status'], 'sent')
+        self.assertEqual(get_settings(self.store)['next_run_at'], before)
+
+    def test_no_matches_still_sends_results_and_paused_run_is_reported_honestly(self):
+        from discovery import batch_detail, save_progress
+        from email_digest import notify_discovery_results
+        self.enable()
+        batch = batch_detail(self.store, self.fixture.batch_id)
+        progress = {**batch['progress'], 'items': [], 'matches': [], 'candidates': []}
+        save_progress(self.store, batch['id'], progress, 'completed')
+        with patch('email_digest.smtp_send') as send:
+            notify_discovery_results(self.store, batch['id'])
+            self.assertIn('No application drafts were prepared', send.call_args.args[0]['text'])
+            self.assertEqual(send.call_args.args[0]['items'], [])
+            progress['error'] = 'Provider paused. Resume manually.'
+            save_progress(self.store, batch['id'], progress, 'waiting')
+            notify_discovery_results(self.store, batch['id'])
+            notify_discovery_results(self.store, batch['id'])
+            self.assertEqual(send.call_count, 2)
+            self.assertIn('Run needs attention', send.call_args.args[0]['text'])
+            self.assertIn('Resume manually', send.call_args.args[0]['text'])
+
+    def test_results_email_failure_is_separate_from_discovery_and_retry_sends_once(self):
+        from discovery import request_results_email, process_batch, batch_detail
+        from email_digest import notify_discovery_results
+        self.enable()
+        request_results_email(self.store, self.fixture.batch_id)
+        with patch('email_digest.smtp_send', side_effect=[DeliveryFailure(False), None]) as send:
+            process_batch(self.store, self.fixture.batch_id)
+            process_batch(self.store, self.fixture.batch_id)
+            self.assertEqual(send.call_count, 1)
+            batch = batch_detail(self.store, self.fixture.batch_id)
+            self.assertEqual(batch['status'], 'completed')
+            self.assertEqual(batch['results_email']['status'], 'failed')
+            notify_discovery_results(self.store, batch['id'], retry=True)
+            notify_discovery_results(self.store, batch['id'], retry=True)
+            self.assertEqual(send.call_count, 2)
+            self.assertEqual(batch_detail(self.store, batch['id'])['results_email']['status'], 'sent')
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM email_digest_deliveries').fetchone()[0], 1)
+            self.assertEqual(db.execute('SELECT attempt_count FROM email_digest_deliveries').fetchone()[0], 2)
+
+    def test_results_unknown_delivery_cannot_retry_and_disabled_email_does_not_send(self):
+        from email_digest import notify_discovery_results
+        with patch('email_digest.smtp_send') as send:
+            result = notify_discovery_results(self.store, self.fixture.batch_id)
+            self.assertEqual(result['status'], 'disabled')
+            send.assert_not_called()
+        self.enable()
+        with patch('email_digest.smtp_send', side_effect=DeliveryFailure(True)) as send:
+            result = notify_discovery_results(self.store, self.fixture.batch_id, retry=True)
+            self.assertEqual(result['status'], 'unknown')
+            notify_discovery_results(self.store, self.fixture.batch_id, retry=True)
+            self.assertEqual(send.call_count, 1)
+
+    def test_busy_mail_sender_can_be_retried_without_searching(self):
+        from email_digest import notify_discovery_results, digest_lock
+        self.enable()
+        with digest_lock(self.store), patch('email_digest.smtp_send') as send:
+            result = notify_discovery_results(self.store, self.fixture.batch_id)
+            self.assertEqual(result['status'], 'pending')
+            send.assert_not_called()
+        with patch('email_digest.smtp_send') as send:
+            self.assertEqual(notify_discovery_results(self.store, self.fixture.batch_id, retry=True)['status'], 'sent')
+            self.assertEqual(send.call_count, 1)
+
+    def test_nonmanual_processing_does_not_change_scheduled_email_behavior(self):
+        from discovery import process_batch
+        self.enable()
+        before = get_settings(self.store)['next_run_at']
+        with patch('email_digest.smtp_send') as send:
+            process_batch(self.store, self.fixture.batch_id)
+            send.assert_not_called()
+        self.assertEqual(get_settings(self.store)['next_run_at'], before)
+
+    def test_manual_discovery_endpoint_marks_run_for_results_email(self):
+        import discovery
+        from discovery import DiscoveryInput, batch_detail
+        app = FastAPI()
+        discovery.register(app, lambda: self.store)
+        self.enable()
+        with TestClient(app) as client, patch('discovery.cached_feed', side_effect=lambda store, source: [fixtures.JOB] if source == 'remotive' else []), patch('application_agents.call_agent', side_effect=self.fixture.model), patch('email_digest.smtp_send') as send:
+            response = client.post('/api/discovery', json=DiscoveryInput(resume_id='resume', max_applications=1, request_id='manual-email-run').model_dump(mode='json'))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(send.call_count, 1)
+            batch = batch_detail(self.store, response.json()['id'])
+            self.assertTrue(batch['progress']['email_on_completion'])
+            self.assertEqual(batch['results_email']['status'], 'sent')
+            with patch('application_agents.call_agent') as model:
+                again = client.post(f"/api/discovery/{batch['id']}/email")
+                self.assertEqual(again.status_code, 200)
+                model.assert_not_called()
+            self.assertEqual(send.call_count, 1)
+
     def test_gmail_requires_app_password_and_accepts_display_spaces(self):
         import email_digest as digest_module
         import os
