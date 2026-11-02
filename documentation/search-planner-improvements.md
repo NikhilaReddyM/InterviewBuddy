@@ -69,3 +69,35 @@ post-baseline annotation calibration and a documented SP-029/SP-031 inconsistenc
 Do not attribute that calibration to prompt improvements. Paired quality review
 must use consistent criteria on both runs and preserve the original labels as an
 audit record. AI draft scores are not human-confirmed final scores.
+
+## Guarded-v5 follow-up
+
+`guarded-v5` uses a shorter evidence-focused prompt plus bounded deterministic
+postprocessing in `backend/search_planner_guards.py`. It removes search keywords
+containing recognized emails, web URLs or phone-like digit sequences, applies
+word-bounded exclusion phrases and a small documented alias vocabulary, and omits
+skills with directly recognizable positive/negative experience contradictions.
+A controlled rationale avoids copying identifiers or presenting those detected
+conflicts as resolved. If all terms are filtered, a safe non-conflicting requested
+role is used; otherwise the call fails with an actionable 422 instead of emitting
+unsafe search terms. Exclusion fields containing recognized override commands
+are ignored as filter policy.
+
+The guard is not a general PII detector, role taxonomy or semantic contradiction
+solver. It does not identify names/addresses or every obfuscated identifier,
+interpret arbitrary natural-language exclusions, or prove every capability is
+supported. A model could still add a plausible but unsupported technology. These
+limits belong in the report, not a claim that all guardrails are solved.
+
+Evaluation captures raw structured model output on the model child and the guarded
+output on the parent. Local `guard` metadata records removal reasons/counts and
+recognized conflicts without retaining removed identifier text. The prompt
+fingerprint also includes the guard source hash, so a code change cannot reuse the
+same claimed pipeline version. The frozen benchmark and evaluators are unchanged.
+
+```sh
+backend/.venv/bin/python backend/evals/search_planner/run.py \
+  --release backend/evals/search_planner/datasets/practice-v3 \
+  --planner-variant guarded-v5 --trace --run-name practice-v3-guarded-v5 \
+  --output backend/data/evals/practice-v3-guarded-v5.jsonl
+```

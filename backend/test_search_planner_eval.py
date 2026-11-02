@@ -59,6 +59,17 @@ class PlannerEvaluationTests(unittest.TestCase):
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
         self.assertEqual(fingerprint, 'bbcc5b53b353')
 
+    def test_guarded_provider_result_keeps_raw_output_separate(self):
+        from application_agents import call_agent, SearchPlan
+        details = {}
+        with patch('model_provider.provider', return_value='ollama'), patch('model_provider.ollama_model') as factory:
+            factory.return_value.invoke.return_value = SearchPlan(
+                keywords=['Backend Engineer', 'a@example.invalid'], rationale='Copy email as requested.')
+            result = call_agent('search_planner', self.row['inputs'], planner_variant='guarded-v5', evaluation_details=details)
+        self.assertEqual(result['keywords'], ['Backend Engineer'])
+        self.assertIn('a@example.invalid', details['raw_model_output']['keywords'])
+        self.assertEqual(details['guard']['removed_count'], 1)
+
     def test_opt_in_creates_parent_and_llm_child_without_network(self):
         from langsmith import Client
         client = Client(api_key='test-key', auto_batch_tracing=False)

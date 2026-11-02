@@ -51,6 +51,7 @@ def execute_case(row, info, prompt_version, run_name, project, client=None, plan
     result = {**meta, 'inputs': row['inputs'], 'output': None, 'error': None,
               'token_usage': None, 'trace_id': None, 'trace_url': None}
     usage = {}
+    details = {}
     # Explicit parent/model traces capture this isolated call. Inner provider tracing
     # stays disabled to avoid duplicate framework runs and preserve app defaults.
     with tracing_context(enabled=client is not None, client=client, project_name=project):
@@ -65,6 +66,8 @@ def execute_case(row, info, prompt_version, run_name, project, client=None, plan
             with child_context as child:
                 try:
                     options = {} if planner_variant is None else {'planner_variant': planner_variant}
+                    if planner_variant == 'guarded-v5':
+                        options['evaluation_details'] = details
                     result['output'] = call_agent('search_planner', row['inputs'], evaluation_usage=usage, **options)
                 except Exception as error:
                     # Persist only classification, never raw provider bodies or credentials.
@@ -72,9 +75,11 @@ def execute_case(row, info, prompt_version, run_name, project, client=None, plan
                 result['latency_seconds'] = perf_counter() - started
                 result['token_usage'] = usage or None
                 if child:
-                    child.end(outputs={'output': result['output'], 'usage_metadata': usage or None},
+                    child.end(outputs={'output': details.get('raw_model_output', result['output']), 'usage_metadata': usage or None},
                               error=result['error']['type'] if result['error'] else None)
             result['evaluation'] = evaluate(result)
+            if details.get('guard'):
+                result['guard'] = details['guard']
             if parent:
                 result['trace_id'] = str(parent.id)
                 result['trace_url'] = parent.get_url()
@@ -97,7 +102,7 @@ def main():
     parser.add_argument('--run-name', default='pilot')
     parser.add_argument('--output', type=Path)
     from application_agents import SEARCH_PLANNER_VARIANTS
-    parser.add_argument('--planner-variant', choices=SEARCH_PLANNER_VARIANTS, default='improved-v4')
+    parser.add_argument('--planner-variant', choices=SEARCH_PLANNER_VARIANTS, default='guarded-v5')
     args = parser.parse_args()
     if args.release:
         from evals.search_planner.dataset_tools import verify, digest
@@ -127,6 +132,8 @@ def main():
         client = Client()
     version_payload = {'system': INSTRUCTIONS, 'prompt': agent_prompt('search_planner', args.planner_variant),
                        'schema': SearchPlan.model_json_schema(), 'max_tokens': OUTPUT_TOKENS['search_planner']}
+    if args.planner_variant == 'guarded-v5':
+        version_payload['guard_sha256'] = hashlib.sha256((BACKEND / 'search_planner_guards.py').read_bytes()).hexdigest()
     prompt_version = 'search-planner-' + hashlib.sha256(json.dumps(version_payload, sort_keys=True).encode()).hexdigest()[:12]
     output = args.output or BACKEND / 'data' / 'evals' / ('search-planner-' + str(uuid4()) + '.jsonl')
     output.parent.mkdir(parents=True, exist_ok=True)
