@@ -36,8 +36,8 @@ def load_cases(path, selected=None):
     return rows
 
 
-def execute_case(row, info, prompt_version, run_name, project, client=None):
-    from application_agents import call_agent, compact_context, INSTRUCTIONS, PROMPTS
+def execute_case(row, info, prompt_version, run_name, project, client=None, planner_variant=None):
+    from application_agents import call_agent, compact_context, INSTRUCTIONS, agent_prompt
     from langsmith import trace, tracing_context
     meta = {key: row['metadata'][key] for key in ('dataset_version', 'review_status', 'source_type')}
     for key in ('manifest_sha256', 'purpose'):
@@ -47,6 +47,7 @@ def execute_case(row, info, prompt_version, run_name, project, client=None):
                 run_name=run_name, model=info['model'], provider=info['provider'],
                 expected_output=row['outputs'], correctness=None,
                 evaluation_status='pending_human_review')
+    meta['planner_variant'] = planner_variant or 'baseline'
     result = {**meta, 'inputs': row['inputs'], 'output': None, 'error': None,
               'token_usage': None, 'trace_id': None, 'trace_url': None}
     usage = {}
@@ -58,12 +59,13 @@ def execute_case(row, info, prompt_version, run_name, project, client=None):
         with parent_context as parent:
             started = perf_counter()
             child_context = trace('Model call', run_type='llm', client=client,
-                inputs={'messages': [{'role': 'system', 'content': INSTRUCTIONS + '\n' + PROMPTS['search_planner']},
+                inputs={'messages': [{'role': 'system', 'content': INSTRUCTIONS + '\n' + agent_prompt('search_planner', planner_variant)},
                                      {'role': 'user', 'content': json.dumps(compact_context('search_planner', row['inputs']))}]},
                 metadata={**meta, 'ls_provider': info['provider'], 'ls_model_name': info['model']}) if client else nullcontext(None)
             with child_context as child:
                 try:
-                    result['output'] = call_agent('search_planner', row['inputs'], evaluation_usage=usage)
+                    options = {} if planner_variant is None else {'planner_variant': planner_variant}
+                    result['output'] = call_agent('search_planner', row['inputs'], evaluation_usage=usage, **options)
                 except Exception as error:
                     # Persist only classification, never raw provider bodies or credentials.
                     result['error'] = {'type': type(error).__name__, 'status_code': getattr(error, 'status_code', None)}
@@ -94,6 +96,8 @@ def main():
     parser.add_argument('--project', default='interviewbuddy-search-planner-eval')
     parser.add_argument('--run-name', default='pilot')
     parser.add_argument('--output', type=Path)
+    from application_agents import SEARCH_PLANNER_VARIANTS
+    parser.add_argument('--planner-variant', choices=SEARCH_PLANNER_VARIANTS, default='improved-v4')
     args = parser.parse_args()
     if args.release:
         from evals.search_planner.dataset_tools import verify, digest
@@ -111,7 +115,7 @@ def main():
                           'model_calls': 0, 'uploads': 0}, indent=2))
         return
     from model_provider import metadata
-    from application_agents import INSTRUCTIONS, PROMPTS, SearchPlan, OUTPUT_TOKENS
+    from application_agents import INSTRUCTIONS, agent_prompt, SearchPlan, OUTPUT_TOKENS
     info = metadata()  # Loads the same backend/.env configuration as the app.
     if not info['configured']:
         parser.error('Configure the model provider before running the pilot.')
@@ -121,7 +125,7 @@ def main():
             parser.error('--trace requires LANGSMITH_API_KEY (environment or backend/.env).')
         from langsmith import Client
         client = Client()
-    version_payload = {'system': INSTRUCTIONS, 'prompt': PROMPTS['search_planner'],
+    version_payload = {'system': INSTRUCTIONS, 'prompt': agent_prompt('search_planner', args.planner_variant),
                        'schema': SearchPlan.model_json_schema(), 'max_tokens': OUTPUT_TOKENS['search_planner']}
     prompt_version = 'search-planner-' + hashlib.sha256(json.dumps(version_payload, sort_keys=True).encode()).hexdigest()[:12]
     output = args.output or BACKEND / 'data' / 'evals' / ('search-planner-' + str(uuid4()) + '.jsonl')
@@ -131,7 +135,7 @@ def main():
     try:
         with output.open('x') as stream:
             for row in rows:
-                result = execute_case(row, info, prompt_version, args.run_name, args.project, client)
+                result = execute_case(row, info, prompt_version, args.run_name, args.project, client, args.planner_variant)
                 result['dataset_sha256'] = hashlib.sha256(args.dataset.read_bytes()).hexdigest()
                 result['recorded_at'] = datetime.now(timezone.utc).isoformat()
                 stream.write(json.dumps(result) + '\n')

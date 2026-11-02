@@ -37,6 +37,28 @@ class PlannerEvaluationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.load_cases(Path(__file__).parent / 'evals/search_planner/dataset.jsonl', 'absent')
 
+    def test_variant_reaches_provider_and_unpromoted_default_stays_baseline(self):
+        from application_agents import call_agent, agent_prompt, SearchPlan, INSTRUCTIONS
+        with patch('model_provider.provider', return_value='ollama'), \
+                patch('model_provider.ollama_model') as factory:
+            factory.return_value.invoke.return_value = SearchPlan(keywords=['backend engineer'], rationale='Requested role.')
+            for variant in ('baseline', 'improved-v1', 'improved-v2', 'improved-v3', 'improved-v4', None):
+                call_agent('search_planner', self.row['inputs'], planner_variant=variant)
+                messages = factory.return_value.invoke.call_args.args[0]
+                self.assertEqual(messages[0][1], INSTRUCTIONS + '\n' + agent_prompt('search_planner', variant))
+        self.assertEqual(agent_prompt('search_planner'), agent_prompt('search_planner', 'baseline'))
+        with self.assertRaises(ValueError):
+            agent_prompt('writer', 'baseline')
+
+    def test_baseline_prompt_fingerprint_remains_reproducible(self):
+        import hashlib
+        import json
+        from application_agents import INSTRUCTIONS, agent_prompt, SearchPlan, OUTPUT_TOKENS
+        payload = {'system': INSTRUCTIONS, 'prompt': agent_prompt('search_planner', 'baseline'),
+                   'schema': SearchPlan.model_json_schema(), 'max_tokens': OUTPUT_TOKENS['search_planner']}
+        fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
+        self.assertEqual(fingerprint, 'bbcc5b53b353')
+
     def test_opt_in_creates_parent_and_llm_child_without_network(self):
         from langsmith import Client
         client = Client(api_key='test-key', auto_batch_tracing=False)
