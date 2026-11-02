@@ -5,6 +5,19 @@ runner, deterministic evaluators, and a human-review CSV workflow. Review status
 is recorded per case in `dataset.jsonl`. Formal baseline/improved experiments are
 a later phase.
 
+## 50-case synthetic practice release
+
+The expanded [practice-v1 release](datasets/practice-v1/README.md) contains 50
+synthetic cases, an editable reference-review CSV, frozen rubric/pass bars, and
+a hash manifest. Use it for learning; 45 new reference labels await user review
+and its 100% generated provenance does not meet the handout's below-20% rule.
+Only the observed SP-003 failure is tagged as a known failure.
+
+`dataset_tools.py` validates, freezes, verifies, and uploads a version-tagged
+LangSmith dataset. The runner's `--release` option verifies the frozen files and
+evaluator code before executing. The five-case pilot remains the default; use
+`--release backend/evals/search_planner/datasets/practice-v1` explicitly for 50.
+
 ## Agent boundary
 
 The agent under test is `call_agent('search_planner', inputs)` in

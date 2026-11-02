@@ -40,6 +40,9 @@ def execute_case(row, info, prompt_version, run_name, project, client=None):
     from application_agents import call_agent, compact_context, INSTRUCTIONS, PROMPTS
     from langsmith import trace, tracing_context
     meta = {key: row['metadata'][key] for key in ('dataset_version', 'review_status', 'source_type')}
+    for key in ('manifest_sha256', 'purpose'):
+        if key in row['metadata']:
+            meta[key] = row['metadata'][key]
     meta.update(case_id=row['case_id'], prompt_version=prompt_version,
                 run_name=run_name, model=info['model'], provider=info['provider'],
                 expected_output=row['outputs'], correctness=None,
@@ -82,7 +85,9 @@ def execute_case(row, info, prompt_version, run_name, project, client=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dataset', type=Path, default=Path(__file__).with_name('dataset.jsonl'))
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument('--dataset', type=Path, default=None)
+    source.add_argument('--release', type=Path, help='Verify a frozen release and evaluator snapshot before running.')
     parser.add_argument('--case-id')
     parser.add_argument('--dry-run', action='store_true', help='Validate cases without model calls or uploads.')
     parser.add_argument('--trace', action='store_true', help='Upload case inputs, prompts and outputs to LangSmith.')
@@ -90,7 +95,17 @@ def main():
     parser.add_argument('--run-name', default='pilot')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
+    if args.release:
+        from evals.search_planner.dataset_tools import verify, digest
+        verify(args.release)
+        if digest(Path(__file__).with_name('evaluators.py')) != digest(args.release / 'evaluators.py'):
+            parser.error('Current evaluators differ from frozen release; create a new version.')
+        args.dataset = args.release / 'dataset.jsonl'
+    args.dataset = args.dataset or Path(__file__).with_name('dataset.jsonl')
     rows = load_cases(args.dataset, args.case_id)
+    if args.release:
+        for row in rows:
+            row['metadata']['manifest_sha256'] = digest(args.release / 'manifest.json')
     if args.dry_run:
         print(json.dumps({'case_ids': [r['case_id'] for r in rows], 'review_statuses': [r['metadata']['review_status'] for r in rows],
                           'model_calls': 0, 'uploads': 0}, indent=2))

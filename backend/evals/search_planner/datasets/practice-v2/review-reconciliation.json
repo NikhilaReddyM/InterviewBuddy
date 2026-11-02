@@ -1,0 +1,57 @@
+{
+  "policy_confirmation": "Follow the requested target role; past experience supports keywords",
+  "imported_at": "2026-11-02T00:26:16.245012+00:00",
+  "approved": 42,
+  "policy_reconciled_pending_confirmation": 8,
+  "timestamp_note": "Review timestamps were blank or contained comments. No human review time has been fabricated.",
+  "resolutions": [
+    {
+      "case_id": "SP-003",
+      "original_feedback": "Mentioned they have QA experience",
+      "resolution": "QA is historical experience, but the explicit target is Junior Backend Developer and QA roles are excluded. Preserve junior backend keywords; do not target QA.",
+      "status": "policy_reconciled_pending_confirmation"
+    },
+    {
+      "case_id": "SP-029",
+      "original_feedback": "This is Senior Backend role",
+      "resolution": "Six years of Java backend experience does not replace the explicit Junior Frontend Developer target. Do not label those years frontend experience.",
+      "status": "policy_reconciled_pending_confirmation"
+    },
+    {
+      "case_id": "SP-030",
+      "original_feedback": "Senior data analyst",
+      "resolution": "Historical analyst work supports skills, but the requested Junior Data Engineer role controls search intent. Do not infer a senior analyst target.",
+      "status": "policy_reconciled_pending_confirmation"
+    },
+    {
+      "case_id": "SP-031",
+      "original_feedback": "Currently in manager role",
+      "resolution": "A current manager can request an individual-contributor role. Preserve the Backend Engineer target rather than substituting management roles.",
+      "status": "policy_reconciled_pending_confirmation"
+    },
+    {
+      "case_id": "SP-032",
+      "original_feedback": "It should be senior cobol engineer",
+      "resolution": "Eight years of COBOL work does not override the requested Junior Python Developer target, nor establish senior Python experience.",
+      "status": "policy_reconciled_pending_confirmation"
+    },
+    {
+      "case_id": "SP-033",
+      "original_feedback": "It should be junior android engineer",
+      "resolution": "The explicit target is Data Engineer despite Android history. Search the requested role without inventing data skills or substituting junior Android.",
+      "status": "policy_reconciled_pending_confirmation"
+    },
+    {
+      "case_id": "SP-039",
+      "original_feedback": "Should be junior role",
+      "resolution": "Senior Backend Engineer is an explicit desired role, not a claim of previously holding that title. Preserve the desired senior role; do not fabricate senior experience.",
+      "status": "policy_reconciled_pending_confirmation"
+    },
+    {
+      "case_id": "SP-041",
+      "original_feedback": "can be full stack role",
+      "resolution": "C# Backend Developer is the explicit target. C# and ASP.NET support backend work; do not substitute full-stack work or invent frontend expertise.",
+      "status": "policy_reconciled_pending_confirmation"
+    }
+  ]
+}

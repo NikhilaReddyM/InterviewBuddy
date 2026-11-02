@@ -1,0 +1,8 @@
+{
+  "source": "practice-v2/case-review.csv",
+  "approved": 50,
+  "imported_at": "2026-11-02T01:17:15.024777+00:00",
+  "human_review_timestamp": "Not supplied; import time is not represented as human review time.",
+  "input_changes": 0,
+  "expected_output_changes": 0
+}

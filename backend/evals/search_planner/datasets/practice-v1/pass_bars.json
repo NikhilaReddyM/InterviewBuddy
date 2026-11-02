@@ -1,0 +1,10 @@
+{
+  "dataset_version": "practice-v1",
+  "purpose": "synthetic_practice",
+  "role_alignment": {"minimum_pass_rate": 0.90, "method": "rubric judgment; human confirmation pending"},
+  "grounding": {"minimum_pass_rate": 0.95, "method": "rubric judgment; human confirmation pending"},
+  "output_compliance": {"minimum_pass_rate": 1.0, "method": "strict schema, keyword count, blanks, normalized duplicates"},
+  "latency": {"maximum_p95_seconds": 10.0, "method": "nearest rank, measured planner calls including errors", "missing_measurements": "report coverage; no pass with missing measurements"},
+  "tokens": {"maximum_improved_to_baseline_mean_ratio": 1.0, "method": "same cases and model; known total tokens only", "missing_measurements": "report coverage; no efficiency conclusion with missing totals"},
+  "notes": "Frozen practice thresholds before the 50-case baseline. Pilot latencies were below 10 seconds; five cases do not establish tail performance. No measured baseline or improvement is claimed. Synthetic practice is not handout-compliant."
+}

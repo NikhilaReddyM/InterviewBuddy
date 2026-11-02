@@ -1,0 +1,25 @@
+{
+  "cases": 50,
+  "dataset_version": "practice-v3",
+  "scenario_counts": {
+    "happy_path": 25,
+    "known_failure": 1,
+    "edge": 21,
+    "adversarial": 3
+  },
+  "source_counts": {
+    "llm_generated": 50
+  },
+  "review_counts": {
+    "approved": 50
+  },
+  "submission_ready": false,
+  "purpose": "practice",
+  "frozen_at": "2026-11-02T01:17:15.276868+00:00",
+  "files": {
+    "dataset.jsonl": "a376d2e39beb5a253aeecf9dab3207df4acbe6ae33d85d769b68c406e3919a94",
+    "rubric.md": "17617397027fa8461a79ea374f537d3d342ba0e9dd9028674ac3f7cc4e4ca66f",
+    "pass_bars.json": "3e3024f5aa08561a01a55a7a6a15ee44fea894d4a18c25ca1ae00a78ba359567",
+    "evaluators.py": "6a6deb54516937d39a6d1cf61038150e8567eb2b1297b7ef86f3d9e51053982e"
+  }
+}
